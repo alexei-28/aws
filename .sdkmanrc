@@ -1,0 +1,13 @@
+# Enable auto-env through the sdkman_auto_env config
+# Add key=value pairs of SDKs to use below
+
+# JDK and class file format version:
+# Java SE 25 = 69
+# Java SE 21 = 65
+# Java SE 17 = 61 (0x3D hex)
+# Java SE 11 = 55 (0x37 hex)
+# Java SE 8  = 52 (0x34 hex)
+#
+
+java=21.0.10-oracle
+gradle=8.5
