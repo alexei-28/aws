@@ -6,10 +6,10 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication
-public class AwsApplication {
-	private static final Logger logger = LoggerFactory.getLogger(AwsApplication.class);
+public class Main {
+	private static final Logger logger = LoggerFactory.getLogger(Main.class);
 	public static void main(String[] args) {
-		SpringApplication.run(AwsApplication.class, args);
+		SpringApplication.run(Main.class, args);
 		logger.info("\n\n ===== Application started successfully! =====\nAWS");
 		logger.info(
 				"\nJava version: {}, Java vendor: {}",

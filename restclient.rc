@@ -6,6 +6,7 @@
 
 # Some generic vars
 :BASE_URL = http://localhost:8080
+:BASE_URL_TASK_1 = http://localhost:8081
 
 # Header
 :REQUEST_HEADER = <<
@@ -25,3 +26,7 @@ GET :BASE_URL/actuator/beans
 
 # Say hello
 GET :BASE_URL/hello
+
+
+# Say hello
+GET :BASE_URL_TASK_1/hello
