@@ -1,0 +1,27 @@
+# Help: https://github.com/pashky/restclient.el
+# More examples: https://github.com/pashky/restclient.el/blob/master/examples/httpbin
+# C-c C-v: same as C-c C-c, but doesn't switch focus to other window
+# C-c C-u: copy query under the cursor as a curl command
+# C-h e (view-echo-area-messages): print request header and body
+
+# Some generic vars
+:BASE_URL = http://localhost:8080
+
+# Header
+:REQUEST_HEADER = <<
+Content-Type: application/json
+
+# Actuator
+GET :BASE_URL/actuator/health
+
+# 
+GET :BASE_URL/actuator/info
+
+#
+GET :BASE_URL/actuator/metrics
+
+# Show all beans
+GET :BASE_URL/actuator/beans
+
+# Say hello
+GET :BASE_URL/hello
