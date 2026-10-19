@@ -1,0 +1,21 @@
+server:
+  port: 8080
+
+spring:
+  mvc:
+    servlet:
+      path: /api/v1
+
+# Actuator settings.
+management:
+  endpoints:
+    web:
+      exposure:
+        include:
+        #- beans
+        - health
+        - info
+        - metrics
+  endpoint:
+    health:
+      show-details: always
