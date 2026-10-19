@@ -5,23 +5,23 @@
 # C-h e (view-echo-area-messages): print request header and body
 
 # Some generic vars
-:BASE_URL = http://localhost:8080
+:BASE_URL_TASK_1 = http://localhost:8081/api/v1
 
 # Header
 :REQUEST_HEADER = <<
 Content-Type: application/json
 
 # Actuator
-GET :BASE_URL/actuator/health
-
-# 
-GET :BASE_URL/actuator/info
+GET :BASE_URL_TASK_1/actuator/health
 
 #
-GET :BASE_URL/actuator/metrics
+GET :BASE_URL_TASK_1/actuator/info
+
+#
+GET :BASE_URL_TASK_1/actuator/env
 
 # Show all beans
-GET :BASE_URL/actuator/beans
+GET :BASE_URL_TASK_1/actuator/beans
 
 # Say hello
-GET :BASE_URL/hello
+GET :BASE_URL_TASK_1/hello
