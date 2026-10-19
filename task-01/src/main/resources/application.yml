@@ -1,0 +1,34 @@
+server:
+  port: 8081
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info
+
+spring:
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 15MB
+  mvc:
+    servlet:
+      path: /api/v1
+
+#  AWS Console
+#  https://eu-north-1.console.aws.amazon.com/console/home?region=eu-north-1
+# Account ID = aws-alexei
+# IAM username = a_subscriber
+# В консоли запусти:
+#  aws configure get region
+# Это вернёт регион из конфигурации профиля (из ~/.aws/config)
+aws:
+  s3:
+    region: eu-north-1 # Укажите ваш регион, например eu-central-1 (Франкфурт) или us-east-1
+    bucket-name: my-bucket-118697848787-eu-north-1-an # Замените на имя вашего бакета в AWS
+
+logging:
+  level:
+    org.springframework.web: DEBUG
+    com.gmail.alexei28.aws.task_1: DEBUG
