@@ -89,12 +89,8 @@ public class DocumentService {
 
         String contentType = file.getContentType();
 
-        if (contentType == null
-                || !properties.allowedContentTypes()
-                .contains(contentType.toLowerCase(Locale.ROOT))) {
-            throw new IllegalArgumentException(
-                    "Unsupported file type"
-            );
+        if (contentType == null || !properties.allowedContentTypes().contains(contentType.toLowerCase(Locale.ROOT))) {
+            throw new IllegalArgumentException("Unsupported file type");
         }
 
         sanitizeFileName(file.getOriginalFilename());

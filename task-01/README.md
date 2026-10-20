@@ -30,22 +30,12 @@
 ### Переменные окружения
 Для локальной разработки (credentials from  ~/.aws/credentials):
 
-#### Как запустить приложение:
-
-``` shell
-  AWS_PROFILE=default \
-  AWS_REGION=eu-north-1 \
-  AWS_S3_BUCKET=my-bucket-118697848787-eu-north-1-an \
-  AWS_ACCESS_KEY_ID=my_aws_access_key \
-  AWS_SECRET_ACCESS_KEY=my_secret_access_key \
-  ./gradlew task-01:bootRun
-```
-
 ### Примеры запросов
 #### Загрузить документ
 
 ``` shell
-  curl -X POST http://localhost:8081/api/v1/documents  -F "file=@/home/alexei/dev/temp/temp.txt"
+  curl -X POST http://localhost:8081/api/v1/documents  -F "file=@/home/alexei/dev/projects/aws/task-01/src/main/resources/banner.txt"
+
 ```
   
 Пример ответа 201 Created:
@@ -67,7 +57,7 @@
 #### Скачать документ
 ``` shell
   curl -OJ http://localhost:8081/api/v1/documents/d3b07384-d9a0-4f21-9f10-5c4f90d2b0aa/download
-```  
+```
 
 #### Удалить документ
 ``` shell
