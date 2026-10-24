@@ -1,5 +1,5 @@
 rootProject.name = "aws"
 
 include("app")
-include("task-01")
+include("task-s3")
 include("task-02")
