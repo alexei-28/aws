@@ -12,7 +12,7 @@ server:
 
 spring:
   application:
-    name: document-storage-service
+    name: task-01
 
   mvc:
     servlet:

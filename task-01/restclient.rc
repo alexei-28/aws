@@ -25,3 +25,6 @@ GET :BASE_URL_TASK_1/actuator/beans
 
 # Say hello
 GET :BASE_URL_TASK_1/hello
+
+# Upload file to the AWS S3.
+  curl -X POST http://localhost:8081/api/v1/documents  -F "file=@/home/alexei/dev/projects/aws/task-01/src/main/resources/banner.txt"

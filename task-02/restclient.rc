@@ -1,0 +1,25 @@
+# Help: https://github.com/pashky/restclient.el
+# More examples: https://github.com/pashky/restclient.el/blob/master/examples/httpbin
+# C-c C-v: same as C-c C-c, but doesn't switch focus to other window
+# C-c C-u: copy query under the cursor as a curl command
+# C-h e (view-echo-area-messages): print request header and body
+
+# Some generic vars
+:BASE_URL = http://localhost:8082/api/v1
+:JOB_ID = 0fc67eb5-e08b-4a03-b3cb-544cd350179b
+# Actuator
+GET :BASE_URL/actuator/health
+
+# Send object key to AWS SQS.
+# Значение objectKey — это имя твоего объекта в твокм S3-бакете.
+# Имена твоих объектов можно посмотреть здесь: AWS Console -> S3 -> select your S3 bucket -> section Objects -> select specific object -> key
+POST :BASE_URL/documents
+Content-Type: application/json
+
+{
+  "objectKey": "documents/77a40eaf-5765-40b9-b60f-e7a060c17918"
+}
+
+
+# Check status
+GET :BASE_URL/jobs/:JOB_ID
