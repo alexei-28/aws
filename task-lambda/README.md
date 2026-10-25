@@ -122,7 +122,35 @@ Job с этим jobId отправляется в твою очередь AWS SQ
     ]
 }
 ```
-
+### Убедитесь, что IAM-роль, назначенная вашей AWS Lambda функции, имеет разрешение dynamodb:CreateTable
+ 1. Откройте консоль AWS Lambda и выберите вашу функцию.
+ 2. Перейдите на вкладку Configuration (Конфигурация) -> Permissions (Разрешения).
+ 3. В блоке Execution role (Роль выполнения) найдите название роли и нажмите на него (вы перейдете в сервис IAM).
+ 4. На странице роли в IAM нажмите кнопку Add permissions (Добавить разрешения) -> Create inline policy (Создать встроенную политику).
+ 5. Перейдите на вкладку JSON и вставьте следующий JSON-код:
+ 
+ ```json
+  {
+      "Version": "2012-10-17",
+      "Statement": [
+          {
+              "Effect": "Allow",
+              "Action": [
+                  "dynamodb:CreateTable",
+                  "dynamodb:DescribeTable",
+                  "dynamodb:PutItem",
+                  "dynamodb:GetItem",
+                  "dynamodb:UpdateItem",
+                  "dynamodb:DeleteItem",
+                  "dynamodb:Scan",
+                  "dynamodb:Query"
+              ],
+              "Resource": "*"
+          }
+      ]
+  } 
+```
+ 6. Нажмите Next, введите имя политики (например, LambdaDynamoDbTablePolicy) и нажмите Create policy.
 
 #### Повторите попытку:
 - Вернитесь в консоль Lambda, обновите страницу и попробуйте снова добавить триггер SQS. Ошибка должна исчезнуть, 

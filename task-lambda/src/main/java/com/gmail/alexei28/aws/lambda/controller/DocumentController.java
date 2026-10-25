@@ -47,18 +47,23 @@ public class DocumentController {
         DocumentJob job = new DocumentJob(UUID.randomUUID(), properties.bucket(), objectKey, Instant.now());
         logger.info("submit, \nFrom request successfully created job: {}", job);
         jobStorageService.save(job);
+        logger.info("submit, \nSuccessfully saved in AWS DynamoDb the next job: {}", job);
+        // Если отправка в SQS завершится ошибкой, запись в DynamoDB уже будет существовать.
+        // Это отдельный вопрос надёжности, который позже можно решить через Transactional Outbox.
         sqsJobPublisher.publish(job);
         logger.info("submit, \nSuccessfully sent to AWS SQS the next job: {}", job);
-        return new SubmissionResponse(job.id(), "ACCEPTED");
+        return new SubmissionResponse(job.getId(), "ACCEPTED");
     }
 
-    // Новый метод для запроса состояния по jobId
-    @GetMapping("/{jobId}")
+    // Метод для запроса состояния по jobId
+    @GetMapping("/jobs/{jobId}")
     public DocumentJob getJobStatus(@PathVariable UUID jobId) {
         DocumentJob job = jobStorageService.findById(jobId);
         if (job == null) {
+            logger.warn("getJobStatus, Not found job by id: {}", jobId);
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Job not found");
         }
+        logger.info("getJobStatus, \nSuccessfully find job: {}", job);
         return job;
     }
 

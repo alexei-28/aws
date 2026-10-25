@@ -64,15 +64,15 @@ public class DocumentSqsHandler implements RequestHandler<SQSEvent, SQSBatchResp
         }
         // Если Lambda получит SQS message, то SQS records size > 0
         logger.info("handleRequest, SQSEvent records size: {}", sqsEvent.getRecords().size());
-        for (SQSEvent.SQSMessage message : sqsEvent.getRecords()) {
+        for (SQSEvent.SQSMessage sqsMessage : sqsEvent.getRecords()) {
             try {
-                DocumentJob job = objectMapper.readValue(message.getBody(), DocumentJob.class);
-                logger.info("handleRequest, read job(id): {}", job.id());
+                DocumentJob job = objectMapper.readValue(sqsMessage.getBody(), DocumentJob.class);
+                logger.info("handleRequest, read job(id): {}", job.getId());
                 documentProcessor.process(job);
-                logger.info("handleRequest, successfully processed job(id): {} ", job.id());
+                logger.info("handleRequest, successfully processed job(id): {} ", job.getId());
             } catch (Exception exception) {
                 logger.error("handleRequest, error : {}, {}", exception, exception.getMessage());
-                failures.add(new SQSBatchResponse.BatchItemFailure(message.getMessageId()));
+                failures.add(new SQSBatchResponse.BatchItemFailure(sqsMessage.getMessageId()));
             }
         }
         return new SQSBatchResponse(failures);
