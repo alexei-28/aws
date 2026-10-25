@@ -6,7 +6,7 @@
 
 # Some generic vars
 :BASE_URL = http://localhost:8082/api/v1
-:JOB_ID = 0fc67eb5-e08b-4a03-b3cb-544cd350179b
+:JOB_ID = 30bdab0d-9995-44eb-afa6-fa720e297515
 # Actuator
 GET :BASE_URL/actuator/health
 
@@ -22,4 +22,4 @@ Content-Type: application/json
 
 
 # Check status
-GET :BASE_URL/jobs/:JOB_ID
+GET :BASE_URL/documents/jobs/:JOB_ID

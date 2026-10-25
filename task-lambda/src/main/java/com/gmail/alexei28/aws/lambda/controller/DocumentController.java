@@ -52,8 +52,8 @@ public class DocumentController {
         return new SubmissionResponse(job.id(), "ACCEPTED");
     }
 
-    // Новый метод для запроса состояния по jobId
-    @GetMapping("/{jobId}")
+    // Метод для запроса состояния по jobId
+    @GetMapping("/jobs/{jobId}")
     public DocumentJob getJobStatus(@PathVariable UUID jobId) {
         DocumentJob job = jobStorageService.findById(jobId);
         if (job == null) {
