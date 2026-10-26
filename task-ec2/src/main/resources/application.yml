@@ -1,0 +1,30 @@
+# Кастомная конфигурация окружения
+app:
+  environment: Local
+
+server:
+  port: 8083
+
+spring:
+  application:
+    name: task-ec2
+
+  mvc:
+    servlet:
+      path: /api/v1
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include:
+          - health
+          - info
+          - env    # only in dev mode
+          - beans  # only in dev mode
+
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
