@@ -30,7 +30,7 @@ EC2 - Amazon Elastic Compute Cloud (Amazon EC2).
 Приложение запустится с дефолтным файлом application.yml, и environment будет равен Local.
 
 ```bash
-  ./gradlew task-ec2:bootRun
+  ./gradlew ec2:bootRun
 ``` 
 
 Request to local to get info about server environment:
@@ -51,7 +51,7 @@ Response:
 При запуске JAR-файла активируйте профиль ec2:
 
 ```bash
-  java -Dspring.profiles.active=ec2 -jar task-ec2-0.0.1-SNAPSHOT.jar
+  java -Dspring.profiles.active=ec2 -jar ec2-0.0.1-SNAPSHOT.jar
 ``` 
 
 Show active profile on EC2:
@@ -87,7 +87,7 @@ GET http://localhost:8083/api/v1/actuator/env
 если остальные ресурсы уже находятся там.
 
 Нажми Launch instance и заполни настройки:
-- Name, например, task-ec2-server
+- Name, например, ec2-server
 
 - Application and OS Images (AMI)
 
@@ -98,7 +98,7 @@ GET http://localhost:8083/api/v1/actuator/env
 Amazon Elastic Compute Cloud
 
 #### Key pair (login)
-Нажми Create new key pair, назови ключ task-ec2-key, выбери .pem и скачай его. Не теряй файл и не публикуй его в Git.
+Нажми Create new key pair, назови ключ ec2-key, выбери .pem и скачай его. Не теряй файл и не публикуй его в Git.
 
 #### Network settings
 Настрой правила входящего трафика:
@@ -150,10 +150,10 @@ java -version
 Должна отображаться Java 21. Это соответствует твоему проекту, если он собран с Java 21.
 
 Создай каталог приложения:
-mkdir -p ~/apps/task-ec2
+mkdir -p ~/apps/ec2
 
 ### Шаг 4. Собрать JAR на своём компьютере
-Вернись в локальный терминал Ubuntu, в корень проекта task-ec2.
+Вернись в локальный терминал Ubuntu, в корень проекта ec2.
 
 Если используешь Gradle Wrapper:
 ./gradlew clean bootJar
@@ -165,7 +165,7 @@ ls -lh build/libs/
 
 Ожидаемый результат — файл вроде:
 
-task-ec2-0.0.1-SNAPSHOT.jar
+ec2-0.0.1-SNAPSHOT.jar
 
 Если имя отличается, используй фактическое имя файла.
 
@@ -179,12 +179,12 @@ scp -i ec2/secrets/ec2-key.pem \
 
 ### Шаг 6. Запустить Spring Boot
 Теперь подключись к EC2 по SSH, если ещё не подключён, и выполни:
-cd ~/apps/task-ec2
+cd ~/apps/ec2
 
 
 Запусти приложение:
 java -Dspring.profiles.active=ec2 \
--jar task-ec2-0.0.1-SNAPSHOT.jar
+-jar ec2-0.0.1-SNAPSHOT.jar
 
 
 Оставь терминал открытым. Когда увидишь в логах сообщение о запуске Spring Boot и встроенного сервера Tomcat, приложение должно быть запущено.

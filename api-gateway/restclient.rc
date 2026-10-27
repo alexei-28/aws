@@ -1,0 +1,53 @@
+# Help: https://github.com/pashky/restclient.el
+# More examples: https://github.com/pashky/restclient.el/blob/master/examples/httpbin
+# C-c C-v: same as C-c C-c, but doesn't switch focus to other window
+# C-c C-u: copy query under the cursor as a curl command
+# C-h e (view-echo-area-messages): print request header and body
+
+# Some generic vars
+:BASE_URL_LOCAL = http://localhost:8084/api/v1
+:BASE_URL_API_GATEWAY = http://16.171.27.181:8084/api/v1
+
+
+# Header
+:REQUEST_HEADER = <<
+Content-Type: application/json
+
+# Actuator on my local host
+GET :BASE_URL_LOCAL/actuator/health
+
+# Actuator on EC2
+GET :BASE_URL_API_GATEWAY/actuator/health
+
+# Get 
+GET :BASE_URL_API_GATEWAY/actuator/health
+
+#
+GET :BASE_URL_LOCAL/actuator/info
+
+#
+GET :BASE_URL_API_GATEWAY/actuator/info
+
+#
+GET :BASE_URL_LOCAL/actuator/env
+
+#
+GET :BASE_URL_API_GATEWAY/actuator/env
+
+#
+GET :BASE_URL_LOCAL/actuator/beans
+
+#
+GET :BASE_URL_API_GATEWAY/actuator/beans
+
+# Say hello
+GET :BASE_URL_LOCAL/hello
+
+# Say hello
+GET :BASE_URL_API_GATEWAY/hello
+
+# Get server info. Это позволит сразу увидеть, что запрос действительно обрабатывается EC2-инстансом, а не локальной машиной.
+GET :BASE_URL_LOCAL/info
+
+# Get server info on AWS EC2
+GET :BASE_URL_API_GATEWAY/info
