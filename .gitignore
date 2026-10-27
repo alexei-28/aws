@@ -40,5 +40,5 @@ build
 .env
 .env.*
 
-# task-ec2
-task-ec2/secrets/
+# ec2
+ec2/secrets/

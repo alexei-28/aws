@@ -1,6 +1,6 @@
 rootProject.name = "aws"
 
 include("app")
-include("task-s3")
-include("task-lambda")
-include("task-ec2")
+include("s3")
+include("lambda")
+include("ec2")
