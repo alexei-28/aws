@@ -5,6 +5,10 @@ AWS Console - https://eu-north-1.console.aws.amazon.com/console/home?region=eu-n
 
 Generate banner -  http://patorjk.com/software/taag
 
+Найти процесс, занимающий порт xxxx:
+
+sudo lsof -i :xxxx
+
 #### How run app (e.g. task-s3):
 
 Secrets are in .env
