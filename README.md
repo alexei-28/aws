@@ -5,6 +5,8 @@ AWS Console - https://eu-north-1.console.aws.amazon.com/console/home?region=eu-n
 
 Generate banner -  http://patorjk.com/software/taag
 
+ASCII Art font: ANSI Shadow, Filter: None
+
 Найти процесс, занимающий порт xxxx:
 
 sudo lsof -i :xxxx

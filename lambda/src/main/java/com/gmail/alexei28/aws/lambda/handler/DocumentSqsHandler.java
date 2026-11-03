@@ -5,7 +5,7 @@ import com.amazonaws.services.lambda.runtime.RequestHandler;
 import com.amazonaws.services.lambda.runtime.events.SQSEvent;
 import com.amazonaws.services.lambda.runtime.events.SQSBatchResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.gmail.alexei28.aws.lambda.Lambda;
+import com.gmail.alexei28.aws.lambda.LambdaMain;
 import com.gmail.alexei28.aws.lambda.domain.DocumentJob;
 import com.gmail.alexei28.aws.lambda.processor.DocumentProcessor;
 import org.slf4j.Logger;
@@ -41,7 +41,7 @@ public class DocumentSqsHandler implements RequestHandler<SQSEvent, SQSBatchResp
      * Автоматически достает готовые бины из контекста Spring Boot.
      */
     public DocumentSqsHandler() {
-        ApplicationContext springContext = SpringApplication.run(Lambda.class);
+        ApplicationContext springContext = SpringApplication.run(LambdaMain.class);
         this.documentProcessor = springContext.getBean(DocumentProcessor.class);
         this.objectMapper = springContext.getBean(ObjectMapper.class);
     }

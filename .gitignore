@@ -45,3 +45,7 @@ ec2/secrets/
 
 # api-gateway
 api-gateway/secrets/
+
+# Node.js
+node_modules/
+npm-debug.log*
