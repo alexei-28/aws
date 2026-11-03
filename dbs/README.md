@@ -1002,3 +1002,155 @@ DocumentDB → flexible document results
 
 А **EC2** является runtime-платформой для Spring Boot приложения.
 
+
+### Как проверить, что локально работает
+Чтобы проверить, что твой dbs локально работает, рекомендую пройти несколько проверок: 
+
+PostgreSQL → Spring Boot → REST API → Docker.
+
+Важно: сейчас ProcessingServiceImpl и S3StorageServiceImpl — заглушки.
+Поэтому приложение может запуститься, но функциональность DynamoDB, SQS и S3 ещё не работает.
+
+
+### Проверить PostgreSQL в Docker
+
+docker  compose -f dbs-docker-compose.yml ps
+
+### Проверить подключение
+
+docker exec -it document-hub-postgres psql -U postgres -d document_hub
+
+Внутри PostgreSQL:
+
+```sql
+SELECT version();
+
+SELECT current_database();
+
+\dt
+```
+### Проверить Spring Boot
+   Запусти приложение:
+   ./gradlew bootRun
+
+
+Или через IntelliJ IDEA.
+
+Ожидаемый результат в логах:
+Started DocumentProcessingHubApplication
+
+
+Проверь, что приложение действительно подключилось к PostgreSQL. В логах не должно быть ошибок подключения или миграций Flyway.
+### Проверить Actuator
+   Если ещё не добавил Actuator, добавь зависимость:
+
+   implementation("org.springframework.boot:spring-boot-starter-actuator")
+
+
+В application.yml:
+```yaml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+```
+
+Проверь:
+curl http://localhost:8084/api/v1/actuator/health
+
+
+Ожидаемый ответ:
+{
+"status": "UP"
+}
+
+## Проверить REST API
+Предположим, что у тебя пока нет настроенной Spring Security и JWT-аутентификации. Тогда можно временно тестировать endpoints без авторизации.
+
+Если Security уже настроен, используй действительный JWT.
+
+Проверка регистрации документа
+
+### Проверка создание документа - POST /documents
+```bash
+curl -i -X POST http://localhost:8084/api/v1/documents \
+  -H "Content-Type: application/json" \
+  -d '{
+    "filename": "invoice-001.pdf",
+    "contentType": "application/pdf"
+  }'
+  ```
+
+Ответ:
+```json
+{
+  "id": "4d0afc55-d987-444e-8379-ed062e0f0306",
+  "filename": "invoice-001.pdf",
+  "uploadUrl": "http://localhost:9000/mock-upload/documents/550e8400-e29b-41d4-a716-446655440000/4d0afc55-d987-444e-8379-ed062e0f0306",
+  "createdAt": "2026-11-03T18:45:25.499931201Z"
+}
+```
+
+- id — UUID зарегистрированного документа.
+- filename — имя файла.
+- uploadUrl — временный mock URL вместо настоящего S3 pre-signed URL.
+- createdAt — время создания документа в UTC.
+
+Вызов происходит по цепочке:
+   
+      DocumentController.create()
+         |
+         v
+      DocumentService.create()
+         |
+         v
+      S3StorageServiceImpl.generateUploadUrl()
+         |
+         v
+      UnsupportedOperationException
+         |
+         v
+      HTTP 500
+
+
+#### На сервере EC2:
+При запуске JAR-файла активируйте профиль ec2:
+
+### Проверить PostgreSQL
+```bash
+docker exec -it document-hub-postgres \
+  psql -U postgres -d document_hub \
+  -c "SELECT id, user_id, filename, content_type, s3_key, created_at FROM documents;"
+```
+
+### Получить все документы пользователя:
+```bash
+curl -i http://localhost:8084/api/v1/documents
+```
+
+### Получение документа по ID
+```bash
+curl -i http://localhost:8084/api/v1/documents/4d0afc55-d987-444e-8379-ed062e0f0306
+```
+
+### Следующая проверка — 404 Not Found
+```bash
+curl -i http://localhost:8084/api/v1/documents/00000000-0000-0000-0000-000000000000
+```
+
+response
+```json
+{
+   "timestamp": "2026-11-03T19:06:13.278+00:00",
+   "status": 404,
+   "error": "Not Found",
+   "path": "/api/v1/documents/00000000-0000-0000-0000-000000000000"
+}
+```
+Обрати внимание: сейчас Spring Boot возвращает стандартный JSON с полями timestamp, status, error, path
+
+### Запуск на EC2
+```bash
+  java -Dspring.profiles.active=ec2 -jar dbs-0.0.1-SNAPSHOT.jar
+``` 
