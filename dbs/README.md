@@ -1011,15 +1011,20 @@ PostgreSQL → Spring Boot → REST API → Docker.
 Важно: сейчас ProcessingServiceImpl и S3StorageServiceImpl — заглушки.
 Поэтому приложение может запуститься, но функциональность DynamoDB, SQS и S3 ещё не работает.
 
+### Download docker images (if needed) and create container
+```bash
+docker compose -f dbs-docker-compose.yml down -v
+docker compose -f dbs-docker-compose.yml up -d
+```
 
 ### Проверить PostgreSQL в Docker
-
-docker  compose -f dbs-docker-compose.yml ps
-
+```bash
+docker compose -f dbs-docker-compose.yml ps
+```
 ### Проверить подключение
-
-docker exec -it document-hub-postgres psql -U postgres -d document_hub
-
+```bash
+docker exec -it aws_dbs_postgres psql -U postgres -d aws_dbs_document_hub
+```
 Внутри PostgreSQL:
 
 ```sql
@@ -1031,14 +1036,16 @@ SELECT current_database();
 ```
 ### Проверить Spring Boot
    Запусти приложение:
+```bash
    ./gradlew bootRun
-
+```
 
 Или через IntelliJ IDEA.
 
 Ожидаемый результат в логах:
-Started DocumentProcessingHubApplication
-
+```log
+Started DbsMain
+```
 
 Проверь, что приложение действительно подключилось к PostgreSQL. В логах не должно быть ошибок подключения или миграций Flyway.
 ### Проверить Actuator

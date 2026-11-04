@@ -11,21 +11,21 @@ spring:
   profiles:
     default: local
   datasource:
-    url: jdbc:postgresql://localhost:5432/document_hub
+    url: jdbc:postgresql://localhost:5432/aws_dbs_document_hub
     username: postgres
     password: postgres
     driver-class-name: org.postgresql.Driver
 
-    jpa:
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: true
+    properties:
       hibernate:
-        ddl-auto: validate
-      show-sql: true
-      properties:
-        hibernate:
-          format_sql: true
+        format_sql: true
 
-    flyway:
-      enabled: true
+  flyway:
+    enabled: true
 
   mvc:
     servlet:
@@ -45,4 +45,3 @@ management:
     health:
       probes:
         enabled: true
-
