@@ -1099,7 +1099,7 @@ curl -i -X POST http://localhost:8084/api/v1/documents \
 Ответ:
 ```json
 {
-  "id": "4d0afc55-d987-444e-8379-ed062e0f0306",
+  "id": "4c12e8d7-5de9-49a0-864b-54209baaec00",
   "filename": "invoice-001.pdf",
   "uploadUrl": "http://localhost:9000/mock-upload/documents/550e8400-e29b-41d4-a716-446655440000/4d0afc55-d987-444e-8379-ed062e0f0306",
   "createdAt": "2026-11-03T18:45:25.499931201Z"
@@ -1145,16 +1145,16 @@ curl -i http://localhost:8084/api/v1/documents
 
 ### Получение документа по ID
 ```bash
-curl -i http://localhost:8084/api/v1/documents/3389b6cc-4116-4765-b2d6-9d8965bcde07
+curl -i http://localhost:8084/api/v1/documents/4c12e8d7-5de9-49a0-864b-54209baaec00
 ```
 response
 ```json
 {
-  "id": "3389b6cc-4116-4765-b2d6-9d8965bcde07",
-  "filename": "invoice-001.pdf",
-  "contentType": "application/pdf",
-  "s3Key": "documents/550e8400-e29b-41d4-a716-446655440000/3389b6cc-4116-4765-b2d6-9d8965bcde07",
-  "createdAt": "2026-11-04T08:22:11.192641Z"
+  "id":"4c12e8d7-5de9-49a0-864b-54209baaec00",
+  "filename":"invoice-001.pdf",
+  "contentType":"application/pdf",
+  "s3Key":"documents/550e8400-e29b-41d4-a716-446655440000/4c12e8d7-5de9-49a0-864b-54209baaec00",
+  "createdAt":"2026-11-05T13:14:55.794384Z"
 }
 ```
 
@@ -1370,11 +1370,13 @@ sudo dnf install -y postgresql17
 
 ```bash
 psql \
-  -h YOUR_RDS_ENDPOINT \
+  -h aws-dbs-document-hub.chwkoqm0uc0i.eu-north-1.rds.amazonaws.com \
   -p 5432 \
   -U dbadmin \
-  -d document_hub
+  -d postgres
 ```
+
+password = postgres
 
 Введи пароль. Если подключение успешно, выполни:
 
@@ -1403,7 +1405,7 @@ SELECT version();
 
 | Параметр | Значение |
 | :--- | :--- |
-| **Table name** | `document-processing-state-dev` |
+| **Table name** | `dbs-document-processing-state-dev` |
 | **Partition key** | `documentId` |
 | **Partition key type** | String |
 | **Sort key** | Не нужен |
@@ -2021,3 +2023,25 @@ curl -i http://YOUR_EC2_PUBLIC_IP:8084/api/v1/documents/YOUR_DOCUMENT_ID/analysi
 ### Следующий шаг
 
 Начнём с **Этапа 1 — VPC и Security Groups**. Сначала уточни: в `eu-north-1` у тебя уже есть **Default VPC** или будем создавать отдельную VPC для `dbs-dev`?
+
+
+### Чек-лист развёртывания и проверки
+     [EC2 Client (curl/Postman)]
+            │
+            ▼
+        ┌───────────┐      1. User/Doc Registration (ACID)      ┌────────────────┐
+        │           ├──────────────────────────────────────────►│ RDS PostgreSQL │
+        │           │                                           └────────────────┘
+        │           │      2. Pre-signed Upload URL / Storage   ┌────────────────┐
+        │           ├──────────────────────────────────────────►│     AWS S3     │
+        │  Spring   │                                           └────────────────┘
+        │   Boot    │      3. Task Queue & Processing           ┌────────────────┐
+        │   (dbs)   ├──────────────────────────────────────────►│    AWS SQS     │
+        │   on EC2  │                                           └────────────────┘
+        │           │      4. Job State & Progress Tracking     ┌────────────────┐
+        │           ├──────────────────────────────────────────►│  AWS DynamoDB  │
+        │           │                                           └────────────────┘
+        │           │      5. Unstructured Analysis JSON        ┌────────────────┐
+        │           ├──────────────────────────────────────────►│ AWS DocumentDB │
+        └───────────┘                                           └────────────────┘
+

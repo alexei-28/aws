@@ -1,2 +1,29 @@
 app:
   environment: EC2
+
+  spring:
+    datasource:
+      url: jdbc:postgresql://https://aws-dbs-document-hub.chwkoqm0uc0i.eu-north-1.rds.amazonaws.com:5432/aws-dbs-document-hub
+      username: dbadmin
+      password: postgres
+      driver-class-name: org.postgresql.Driver
+
+    data:
+      mongodb:
+        uri: mongosh dbs-document-hub-docdb-dev.cluster-chwkoqm0uc0i.eu-north-1.docdb.amazonaws.com:27017 --tls --tlsCAFile global-bundle.pem --retryWrites=false --username dbadmin --password postgres
+
+    jpa:
+      show-sql: false
+      properties:
+        hibernate:
+          format_sql: false
+
+    flyway:
+      enabled: true
+
+  aws:
+    region: eu-north-1
+    s3:
+      bucket: my-bucket-118697848787-eu-north-1-an
+    dynamodb:
+      table-name: dbs-document-processing-state-dev
