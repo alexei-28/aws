@@ -928,6 +928,13 @@ SQS
    of Truth
 ```
 
+#### Распределение ответственности оставляем таким:
+- RDS PostgreSQL - Создание и чтение документов
+- DynamoDB - Создание и обновление статуса обработки
+- DocumentDB - Сохранение и чтение JSON-результата анализа
+
+Важное решение: RDS остаётся источником истины для бизнес-данных. Не нужно дублировать одну и ту же информацию во всех трёх базах.
+
 ### RDS
 
 Отвечает:
@@ -1167,7 +1174,841 @@ response
 ```
 Обрати внимание: сейчас Spring Boot возвращает стандартный JSON с полями timestamp, status, error, path
 
-### Запуск на EC2
+# Deploy на AWS
+# AWS Dev Environment Setup Guide (`dev`)
+
+Для твоего проекта я рекомендую сделать отдельное AWS-окружение `dev`, в котором Spring Boot приложение будет работать на новом EC2, а три базы данных будут размещены в AWS:
+
+- **EC2** — Spring Boot приложение `dbs`
+- **RDS PostgreSQL** — бизнес-данные документов
+- **DynamoDB** — состояние и прогресс обработки
+- **DocumentDB** — результаты анализа документов в JSON
+- **S3** — исходные файлы документов
+- **SQS** — очередь задач обработки
+
+Будем переносить проект постепенно: сначала подключим PostgreSQL на RDS, затем DynamoDB, затем DocumentDB. После каждого этапа проверим работу через HTTP-запросы и AWS Console.
+
+---
+
+## 1. Целевая архитектура AWS
+
+```
+[ Твой компьютер (curl / Postman) ]
+               │
+               ▼
+   [ EC2 — Spring Boot `dbs` ]
+   (Java 21 · REST API · Port 8084)
+               │
+       ┌───────┼──────────────┐
+       ▼       ▼              ▼
+    [ RDS ] [ DynamoDB ] [ DocumentDB ]
+ (PostgreSQL) (Processing) (Analysis JSON)
+```
+
+Все три базы доступны приложению по приватной сети VPC, а не напрямую из интернета.
+
+> **Важный принцип:** EC2 и базы должны находиться в одной VPC. RDS и DocumentDB не должны иметь публичный доступ. Для DynamoDB будем использовать IAM Role и AWS SDK, а не access keys в `application.yml`.
+
+---
+
+## 2. Порядок реализации
+
+| Этап | Что делаем | Проверка |
+| :--- | :--- | :--- |
+| **1** | VPC, Security Groups, IAM Role | Сетевая доступность |
+| **2** | Создаём RDS PostgreSQL | Подключение и Flyway |
+| **3** | Создаём DynamoDB | Запись и чтение статуса |
+| **4** | Создаём DocumentDB | Запись и чтение JSON |
+| **5** | Создаём EC2 | Запуск Spring Boot |
+| **6** | Подключаем все сервисы | Проверка REST API |
+| **7** | Проверяем IAM и CloudWatch | Логи и права доступа |
+
+Я бы делал именно в таком порядке: сначала базы и доступ к ним, затем EC2. Так проще локализовать ошибки подключения.
+
+---
+
+## 3. Подготовка AWS Account и Region
+
+Для проекта предлагаю использовать:
+
+- **Region:** `eu-north-1`
+- **Location:** Europe (Stockholm)
+
+Ты уже использовал `eu-north-1` для SQS. Кроме того, Amazon DocumentDB поддерживает этот регион. Поэтому все компоненты проекта лучше держать в одной Region.
+
+1. Открой [AWS Management Console](https://console.aws.amazon.com/).
+2. В правом верхнем углу выбери **Europe (Stockholm) — eu-north-1**.
+3. Проверь, что все создаваемые ресурсы будут в этой Region.
+4. Открой **Billing → Budgets** и настрой уведомление о расходах.
+
+> **Важно по стоимости:**
+> RDS, EC2 и особенно DocumentDB могут создавать расходы, даже если ты не отправляешь запросы приложению. DynamoDB в режиме On-Demand удобнее для учебного проекта с небольшим количеством запросов, но хранение данных также тарифицируется. Не рассчитывай, что все эти ресурсы автоматически бесплатны.
+
+---
+
+## 4. Сеть: VPC и Security Groups
+
+Сначала подготовим сетевую инфраструктуру.
+
+### 4.1. VPC
+
+Открой **VPC → Your VPCs**.
+
+Для учебного окружения можно использовать существующую **Default VPC**, если она есть в `eu-north-1`.
+
+Проверь:
+- VPC существует.
+- В ней есть Subnets минимум в двух Availability Zones.
+- Включены **DNS resolution** и **DNS hostnames**.
+- Для EC2 будет доступна публичная подсеть с маршрутом через Internet Gateway.
+
+Для RDS и DocumentDB создадим отдельные DB Subnet Groups с подсетями из двух Availability Zones. Это необходимо для корректной конфигурации этих сервисов.
+
+> Для учебного окружения допустимо использовать Default VPC. Для более строгой production-архитектуры лучше отдельная VPC с двумя публичными и двумя приватными подсетями.
+
+### 4.2. Security Groups
+
+Открой **EC2 → Network & Security → Security Groups**.
+
+Создай три Security Groups:
+
+#### 1. `sg-dbs-ec2` (Для Spring Boot приложения)
+| Type | Port | Source |
+| :--- | :--- | :--- |
+| SSH | 22 | My IP |
+| Custom TCP | 8084 | My IP |
+
+> Порт 8084 нужен только для первоначального тестирования API. В production не следует оставлять его открытым напрямую в интернет: лучше использовать ALB и HTTPS.
+
+#### 2. `sg-dbs-rds` (Для PostgreSQL)
+| Type | Port | Source |
+| :--- | :--- | :--- |
+| PostgreSQL | 5432 | `sg-dbs-ec2` |
+
+#### 3. `sg-dbs-docdb` (Для DocumentDB)
+| Type | Port | Source |
+| :--- | :--- | :--- |
+| Custom TCP | 27017 | `sg-dbs-ec2` |
+
+Для всех трёх групп оставь стандартный outbound traffic, если пока не настраиваешь более строгую egress-политику.
+
+> **Принцип безопасности:** в качестве Source указывай Security Group EC2, а не `0.0.0.0/0`. Так базы смогут принимать соединения от приложения, но не от произвольных адресов интернета.
+
+---
+
+## 5. Создание AWS RDS PostgreSQL
+
+Начнём с PostgreSQL, поскольку он уже работает локально и его интеграция с приложением у тебя реализована.
+
+Открой [Amazon RDS Console](https://console.aws.amazon.com/rds/).
+
+### 5.1. Создание базы
+
+1. Выбери **Databases → Create database**.
+2. Выбери **Standard create**.
+3. **Engine type:** `PostgreSQL`.
+4. **Engine version:** PostgreSQL 17, если доступна в выбранной конфигурации.
+5. **Template:** `Dev/Test`.
+
+Рекомендуемые параметры для учебного окружения:
+
+| Параметр | Значение |
+| :--- | :--- |
+| **DB instance identifier** | `document-hub-postgres-dev` |
+| **Master username** | `dbadmin` |
+| **Initial database name** | `document_hub` |
+| **Deployment** | Single-AZ |
+| **Instance class** | Минимальный доступный подходящий класс |
+| **Storage** | 20 GiB gp3 |
+| **Storage autoscaling** | Пока отключить |
+| **Public access** | No |
+| **VPC** | Твоя VPC |
+| **VPC security group** | `sg-dbs-rds` |
+| **Backup retention** | 1 day для учебного окружения |
+
+Пароль сохрани в AWS Secrets Manager, если доступна соответствующая опция управления паролем.
+
+> Для RDS используй приватное подключение. AWS рекомендует не выставлять базу в интернет, а разрешать подключение от EC2 через Security Group.
+
+### 5.2. После создания RDS
+
+Дождись статуса `Available`.
+
+Открой базу и скопируй:
+- Endpoint
+- Port
+- Database name
+- Username
+
+Endpoint будет примерно такого вида:
+```text
+document-hub-postgres-dev.xxxxx.eu-north-1.rds.amazonaws.com
+```
+
+> Не используй этот пример как реальный адрес — скопируй endpoint из своей консоли.
+
+### 5.3. Проверка подключения
+
+Позже, когда создадим EC2, выполни на EC2:
+
 ```bash
-  java -Dspring.profiles.active=ec2 -jar dbs-0.0.1-SNAPSHOT.jar
-``` 
+sudo dnf install -y postgresql17
+```
+
+*Если пакет с таким именем отсутствует в выбранном Amazon Linux AMI, установи совместимый PostgreSQL client.*
+
+Проверка:
+
+```bash
+psql \
+  -h YOUR_RDS_ENDPOINT \
+  -p 5432 \
+  -U dbadmin \
+  -d document_hub
+```
+
+Введи пароль. Если подключение успешно, выполни:
+
+```sql
+SELECT version();
+```
+
+Затем закройте сессию:
+```sql
+\q
+```
+
+`RDS connectivity verified` — *только после фактического успешного подключения.*
+
+---
+
+## 6. Создание DynamoDB
+
+Открой [Amazon DynamoDB Console](https://console.aws.amazon.com/dynamodb/).
+
+### 6.1. Создание таблицы
+
+Выбери **Tables → Create table**.
+
+Настройки:
+
+| Параметр | Значение |
+| :--- | :--- |
+| **Table name** | `document-processing-state-dev` |
+| **Partition key** | `documentId` |
+| **Partition key type** | String |
+| **Sort key** | Не нужен |
+| **Capacity mode** | On-demand |
+
+> **Почему On-demand:** для нашего учебного проекта не нужно заранее рассчитывать Read/Write Capacity Units. Оплата идёт за фактические запросы, а не за зарезервированную пропускную способность.
+
+### 6.2. Модель данных
+
+Предлагаю хранить состояние обработки примерно так:
+
+```json
+{
+  "documentId": "4d0afc55-d987-444e-8379-ed062e0f0306",
+  "status": "PROCESSING",
+  "currentStep": "TEXT_EXTRACTION",
+  "attempts": 1,
+  "createdAt": "2026-11-04T10:00:00Z",
+  "updatedAt": "2026-11-04T10:01:00Z",
+  "expiresAt": 1794000000
+}
+```
+
+Назначение полей:
+
+| Поле | Назначение |
+| :--- | :--- |
+| `documentId` | Partition Key |
+| `status` | Текущий статус |
+| `currentStep` | Этап обработки |
+| `attempts` | Количество попыток |
+| `createdAt` | Время создания |
+| `updatedAt` | Последнее обновление |
+| `expiresAt` | TTL, Unix timestamp в секундах |
+
+Для `expiresAt` впоследствии включим TTL в настройках таблицы. Пока TTL можно не активировать, чтобы записи не удалялись во время тестирования.
+
+### 6.3. Проверка DynamoDB
+
+После создания таблицы:
+1. Открой её.
+2. Перейди в **Explore table items**.
+3. Добавь тестовый Item.
+4. Укажи `documentId` и остальные поля.
+5. Сохрани.
+6. Проверь, что запись появилась.
+
+Это проверяет саму таблицу. Подключение Java-приложения проверим после настройки AWS SDK и IAM Role.
+
+---
+
+## 7. Создание Amazon DocumentDB
+
+Это наиболее специфичная часть конфигурации.
+
+Открой [Amazon DocumentDB Console](https://console.aws.amazon.com/docdb/).
+
+### 7.1. Создание Cluster
+
+Выбери **Clusters → Create**.
+
+Настройки:
+
+| Параметр | Значение |
+| :--- | :--- |
+| **Cluster type** | Instance-based |
+| **Cluster identifier** | `document-hub-docdb-dev` |
+| **Engine version** | Версия по умолчанию |
+| **Instance count** | 1 |
+| **Instance class** | Минимальный доступный подходящий класс |
+| **VPC** | Та же VPC |
+| **Subnet group** | Подсети минимум в двух AZ |
+| **Security group** | `sg-dbs-docdb` |
+| **Port** | 27017 |
+| **Encryption** | Enabled |
+| **Backup retention** | 1 day |
+| **Deletion protection** | Disabled (для временного dev-окружения) |
+
+Для DocumentDB нужен кластер и как минимум одна primary instance. Создание кластера может занять несколько минут.
+
+> **Следи за расходами:** для учебного окружения достаточно одной instance без replica. Не создавай дополнительные реплики, пока не проверишь базовую интеграцию. DocumentDB тарифицирует вычислительные ресурсы и хранение данных.
+
+### 7.2. Credentials
+
+Создай отдельные credentials для DocumentDB. **Не используй PostgreSQL username/password.**
+
+Сохрани:
+- Username
+- Password
+- Cluster endpoint
+- Port
+
+### 7.3. TLS
+
+DocumentDB требует TLS при стандартной конфигурации.
+
+Скачай официальный CA bundle на EC2:
+
+```bash
+sudo mkdir -p /etc/ssl/documentdb
+
+sudo curl -o /etc/ssl/documentdb/global-bundle.pem \
+  https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
+```
+
+AWS описывает подключение Java-приложения через MongoDB Java Driver и CA bundle.
+
+---
+
+## 8. IAM Role для EC2
+
+Это важный этап. Spring Boot должен получать доступ к AWS через IAM Role, а не через сохранённые `AWS_ACCESS_KEY_ID` и `AWS_SECRET_ACCESS_KEY`.
+
+### 8.1. Создание IAM Role
+
+Открой [AWS IAM Console](https://console.aws.amazon.com/iam/).
+
+1. Выбери **Roles → Create role**.
+2. **Trusted entity type:** `AWS service`.
+3. **Use case:** `EC2`.
+4. **Название:** `dbs-ec2-role`
+5. Создай роль.
+
+Добавь разрешения для DynamoDB. Для начала можно создать собственную IAM Policy:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DocumentProcessingStateAccess",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:DescribeTable",
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem"
+      ],
+      "Resource": "arn:aws:dynamodb:eu-north-1:YOUR_ACCOUNT_ID:table/document-processing-state-dev"
+    }
+  ]
+}
+```
+
+*Замени `YOUR_ACCOUNT_ID` на ID своего AWS Account.*
+
+Назови policy: `dbs-dynamodb-access-policy`
+
+При необходимости добавь:
+- `AmazonSSMManagedInstanceCore` — для подключения через Systems Manager.
+- Разрешения на чтение конкретных секретов из Secrets Manager, если приложение будет получать пароли от баз оттуда.
+- S3 permissions позже, когда подключим реальный S3.
+
+> **Важно:** Не используй `AdministratorAccess` для приложения. IAM Role через Instance Profile позволяет AWS SDK автоматически получать временные credentials.
+
+---
+
+## 9. Создание EC2
+
+Теперь создаём виртуальный сервер, на котором будет работать Spring Boot.
+
+Открой [Amazon EC2 Console](https://console.aws.amazon.com/ec2/).
+
+### 9.1. Launch instance
+
+Выбери **Instances → Launch instances**.
+
+Параметры:
+
+| Параметр | Значение |
+| :--- | :--- |
+| **Name** | `document-hub-ec2-dev` |
+| **AMI** | Amazon Linux 2023 |
+| **Architecture** | x86_64 |
+| **Instance type** | `t3.small` (для начала) |
+| **Key pair** | Создать новую |
+| **VPC** | Та же VPC |
+| **Subnet** | Public subnet |
+| **Auto-assign public IP** | Enable |
+| **Security Group** | `sg-dbs-ec2` |
+| **IAM Instance Profile** | `dbs-ec2-role` |
+| **Storage** | 10–20 GiB gp3 |
+
+> `t3.small` — практичнее для запуска Java-приложения, чем `t3.micro` с ограниченной памятью. Это не утверждение о бесплатности: проверь цену в выбранной Region.
+
+### 9.2. Подключение к EC2
+
+После запуска дождись статуса: `Running`
+
+Скопируй Public IPv4 address.
+
+На своём Ubuntu компьютере:
+
+```bash
+chmod 400 ~/Downloads/dbs-key.pem
+```
+
+Подключись:
+
+```bash
+ssh -i ~/Downloads/dbs-key.pem \
+  ec2-user@YOUR_EC2_PUBLIC_IP
+```
+
+Если SSH не работает, проверь:
+- правильный Key Pair;
+- Security Group — порт 22 от твоего IP;
+- Public IPv4;
+- маршрут Public Subnet через Internet Gateway.
+
+*Альтернативный вариант — Session Manager без открытия SSH-порта, если настроены SSM Agent и IAM permissions.*
+
+### 9.3. Установка Java 21
+
+На EC2:
+
+```bash
+sudo dnf update -y
+sudo dnf install -y java-21-amazon-corretto-headless
+java -version
+```
+
+Ожидаемый результат — Java 21.
+
+---
+
+## 10. Настройка Spring Boot для AWS
+
+Теперь нужно подготовить проект к работе с AWS.
+
+У тебя уже есть локальный `application.yml`, но нельзя просто перенести его на EC2: там используются `localhost` и локальный PostgreSQL.
+
+Сделаем отдельные профили:
+
+```text
+dbs/
+└── src/main/resources/
+    ├── application.yml
+    ├── application-local.yml
+    └── application-aws.yml
+```
+
+### 10.1. application.yml
+
+Общие настройки приложения:
+
+```yaml
+server:
+  port: 8084
+
+spring:
+  application:
+    name: dbs
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+```
+
+### 10.2. application-aws.yml
+
+Пример конфигурации:
+
+```yaml
+spring:
+  datasource:
+    url: jdbc:postgresql://${DB_HOST}:${DB_PORT:5432}/${DB_NAME:document_hub}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+
+  data:
+    mongodb:
+      uri: ${DOCDB_URI}
+
+  jpa:
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: false
+
+  flyway:
+    enabled: true
+
+aws:
+  region: ${AWS_REGION:eu-north-1}
+  dynamodb:
+    table-name: document-processing-state-dev
+```
+
+Здесь:
+- `DB_HOST` — endpoint RDS.
+- `DB_USERNAME` и `DB_PASSWORD` — credentials PostgreSQL.
+- `DOCDB_URI` — URI DocumentDB.
+- `AWS_REGION` — AWS Region.
+- `table-name` — имя таблицы DynamoDB.
+
+Для DocumentDB URI будет примерно таким:
+
+```text
+mongodb://USERNAME:PASSWORD@DOCDB_ENDPOINT:27017/document_analysis?tls=true&tlsCAFile=/etc/ssl/documentdb/global-bundle.pem&replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false
+```
+
+Подставь реальные значения. Если в пароле есть специальные символы, их нужно URL-encode в URI.
+
+> **Важно:** `spring.data.mongodb.uri` заработает только после подключения MongoDB Driver / Spring Data MongoDB и настройки совместимого TLS trust store.
+
+### 10.3. Настройка AWS SDK
+
+Для DynamoDB используй AWS SDK for Java 2.x.
+
+Gradle Kotlin DSL:
+
+```kotlin
+dependencies {
+    implementation(platform("software.amazon.awssdk:bom:2.40.0"))
+    implementation("software.amazon.awssdk:dynamodb")
+}
+```
+
+*Версию BOM перед использованием проверь на совместимость с текущим AWS SDK release.*
+
+Пример создания клиента:
+
+```java
+@Configuration
+public class DynamoDbConfig {
+
+    @Bean
+    public DynamoDbClient dynamoDbClient(
+            @Value("${aws.region}") String region
+    ) {
+        return DynamoDbClient.builder()
+                .region(Region.of(region))
+                .build();
+    }
+}
+```
+
+Обрати внимание: мы намеренно не указываем `credentialsProvider`. SDK использует Default Credentials Provider Chain и на EC2 сможет получить временные credentials через IAM Role.
+
+### 10.4. Важный момент с текущим S3-классом
+
+Сейчас у тебя есть:
+
+```java
+@Service
+@Profile("local")
+public class S3StorageServiceImpl implements S3StorageService {
+}
+```
+
+Если запустить приложение с профилем `aws`, этот Bean не зарегистрируется. Следовательно, если не будет другой реализации `S3StorageService`, Spring не сможет создать `DocumentService`.
+
+До запуска на EC2 нужно:
+- либо реализовать `S3StorageServiceAws`;
+- либо временно создать отдельную AWS-профильную заглушку, если на этом этапе проверяем только три базы.
+
+Для полноценной загрузки документов лучше реализовать настоящий S3.
+
+---
+
+## 11. Подготовка приложения к запуску на EC2
+
+### 11.1. Сборка JAR
+
+На локальном компьютере:
+
+```bash
+./gradlew :dbs:clean :dbs:bootJar
+```
+
+Проверь результат:
+
+```bash
+ls -lh dbs/build/libs/
+```
+
+### 11.2. Передача JAR на EC2
+
+```bash
+scp -i ~/Downloads/dbs-key.pem \
+  dbs/build/libs/dbs-0.0.1-SNAPSHOT.jar \
+  ec2-user@YOUR_EC2_PUBLIC_IP:/home/ec2-user/dbs.jar
+```
+
+### 11.3. Передача настроек
+
+На EC2 создай файл:
+
+```bash
+sudo mkdir -p /opt/dbs
+sudo nano /opt/dbs/dbs.env
+```
+
+Пример содержимого `/opt/dbs/dbs.env`:
+
+```env
+SPRING_PROFILES_ACTIVE=aws
+
+DB_HOST=YOUR_RDS_ENDPOINT
+DB_PORT=5432
+DB_NAME=document_hub
+DB_USERNAME=YOUR_DB_USERNAME
+DB_PASSWORD=YOUR_DB_PASSWORD
+
+DOCDB_URI=mongodb://USERNAME:PASSWORD@YOUR_DOCDB_ENDPOINT:27017/document_analysis?tls=true&tlsCAFile=/etc/ssl/documentdb/global-bundle.pem&replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false
+
+AWS_REGION=eu-north-1
+```
+
+Ограничь права:
+
+```bash
+sudo chmod 600 /opt/dbs/dbs.env
+```
+
+> Это временный учебный вариант. Для production credentials лучше получать из Secrets Manager, а не хранить в обычном env-файле.
+
+### 11.4. Создание systemd service
+
+```bash
+sudo nano /etc/systemd/system/dbs.service
+```
+
+Содержимое:
+
+```ini
+[Unit]
+Description=Document Hub Service
+After=network.target
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/home/ec2-user
+
+EnvironmentFile=/opt/dbs/dbs.env
+
+ExecStart=/usr/bin/java -jar /home/ec2-user/dbs.jar
+
+Restart=on-failure
+RestartSec=10
+
+SuccessExitStatus=143
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Запуск:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable dbs
+sudo systemctl start dbs
+```
+
+Проверка статуса и логов:
+
+```bash
+sudo systemctl status dbs
+sudo journalctl -u dbs -f
+```
+
+---
+
+## 12. Проверка работы проекта на AWS
+
+Теперь переходим к самому важному — проверке реальной интеграции.
+
+### 12.1. Проверка Spring Boot
+
+С локального компьютера:
+
+```bash
+curl -i http://YOUR_EC2_PUBLIC_IP:8084/api/v1/actuator/health
+```
+
+Ожидаемый результат:
+
+```json
+{
+  "status": "UP"
+}
+```
+
+### 12.2. Проверка RDS
+
+Создай документ:
+
+```bash
+curl -i -X POST \
+  http://YOUR_EC2_PUBLIC_IP:8084/api/v1/documents \
+  -H "Content-Type: application/json" \
+  -d '{
+    "filename": "aws-invoice-001.pdf",
+    "contentType": "application/pdf"
+  }'
+```
+
+Ожидаем: `HTTP/1.1 201`
+
+Затем получи список:
+
+```bash
+curl -i http://YOUR_EC2_PUBLIC_IP:8084/api/v1/documents
+```
+
+Проверь, что созданная запись появилась в RDS PostgreSQL. Можно также проверить её SQL-запросом через `psql` с EC2.
+
+### 12.3. Проверка DynamoDB
+
+После реализации `ProcessingServiceImpl`:
+
+1. Выполни регистрацию документа.
+2. Приложение должно создать запись в DynamoDB.
+3. Открой **AWS Console → DynamoDB → Tables**.
+4. Открой `document-processing-state-dev`.
+5. Найди запись по `documentId`.
+
+Ожидаемое состояние:
+
+```json
+{
+  "documentId": "YOUR_DOCUMENT_ID",
+  "status": "PENDING",
+  "currentStep": "UPLOAD",
+  "attempts": 0
+}
+```
+
+Затем проверь:
+
+```bash
+curl -i http://YOUR_EC2_PUBLIC_IP:8084/api/v1/documents/{id}/status
+```
+
+Ожидаем `200 OK` и актуальное состояние из DynamoDB.
+
+### 12.4. Проверка DocumentDB
+
+После реализации `AnalysisRepositoryImpl`:
+
+1. Сохрани тестовый JSON-результат анализа.
+2. Проверь наличие документа в коллекции `analyses`.
+3. Получи его через REST API:
+
+```bash
+curl -i http://YOUR_EC2_PUBLIC_IP:8084/api/v1/documents/YOUR_DOCUMENT_ID/analysis
+```
+
+Ожидаем: `HTTP/1.1 200`
+
+Ответ должен содержать JSON, который был сохранён в DocumentDB.
+
+Для проверки подключения можно также использовать MongoDB Java Driver или `mongosh` на EC2. Помни, что TLS должен быть включён и CA bundle должен быть доступен приложению.
+
+---
+
+## 13. Итоговая чек-лист проверка
+
+### AWS Integration Checklist
+
+- [ ] EC2 запущен, Java 21 установлена
+- [ ] Spring Boot запущен через systemd
+- [ ] RDS PostgreSQL доступен из EC2
+- [ ] Flyway успешно применил миграции к RDS
+- [ ] `POST /documents` сохраняет запись в RDS
+- [ ] `GET /documents` читает данные из RDS
+- [ ] DynamoDB принимает и возвращает processing state
+- [ ] DocumentDB сохраняет и возвращает JSON analysis
+- [ ] IAM Role работает без AWS Access Keys в приложении
+- [ ] CloudWatch или systemd logs позволяют диагностировать ошибки
+
+> **Важное уточнение:** сейчас у тебя уже работает PostgreSQL-часть, но DynamoDB и DocumentDB в Java-коде пока не реализованы. Поэтому создание AWS ресурсов само по себе ещё не сделает `GET /status` и `GET /analysis` рабочими. Их подключение — отдельные этапы разработки.
+
+---
+
+## 14. Как не оставить AWS ресурсы работать после тестирования
+
+После завершения учебной сессии:
+
+- **EC2** — остановить (`Stop instance`), если временно не используешь.
+- **RDS** — удалить, если не нужна база; при необходимости предварительно создать snapshot.
+- **DocumentDB** — удалить cluster и instance, если тестирование завершено.
+- **DynamoDB** — удалить таблицу, если данные больше не нужны.
+- Проверить наличие оставшихся EBS Volumes, snapshots и других ресурсов.
+
+> Остановка EC2 не удаляет EBS storage. У RDS и DocumentDB также могут оставаться оплачиваемые ресурсы и данные после остановки или отключения приложения.
+
+---
+
+## 15. Предлагаемый план поэтапного выполнения
+
+Не рекомендую создавать все четыре ресурса и сразу пытаться запустить приложение. Если что-то не подключится, будет сложно понять причину.
+
+Оптимальная последовательность нашей дальнейшей работы:
+
+1. **Сеть и Security Groups:** Подготовить VPC, `sg-dbs-ec2`, `sg-dbs-rds`, `sg-dbs-docdb`.
+2. **RDS PostgreSQL:** Создать RDS, подключиться к нему и перенести локальную Flyway-схему.
+3. **DynamoDB:** Создать таблицу и реализовать `ProcessingServiceImpl`.
+4. **DocumentDB:** Создать кластер, подключить Java Driver и реализовать `AnalysisRepositoryImpl`.
+5. **EC2:** Создать EC2, настроить IAM Role, установить Java и развернуть JAR.
+6. **AWS Integration Testing:** Проверить весь REST API и взаимодействие с тремя базами.
+
+---
+
+### Следующий шаг
+
+Начнём с **Этапа 1 — VPC и Security Groups**. Сначала уточни: в `eu-north-1` у тебя уже есть **Default VPC** или будем создавать отдельную VPC для `dbs-dev`?
