@@ -1126,8 +1126,8 @@ curl -i -X POST http://localhost:8084/api/v1/documents \
 
 ### Проверить PostgreSQL
 ```bash
-docker exec -it document-hub-postgres \
-  psql -U postgres -d document_hub \
+docker exec -it aws_dbs_postgres \
+  psql -U postgres -d aws_dbs_document_hub \
   -c "SELECT id, user_id, filename, content_type, s3_key, created_at FROM documents;"
 ```
 
@@ -1138,7 +1138,17 @@ curl -i http://localhost:8084/api/v1/documents
 
 ### Получение документа по ID
 ```bash
-curl -i http://localhost:8084/api/v1/documents/4d0afc55-d987-444e-8379-ed062e0f0306
+curl -i http://localhost:8084/api/v1/documents/3389b6cc-4116-4765-b2d6-9d8965bcde07
+```
+response
+```json
+{
+  "id": "3389b6cc-4116-4765-b2d6-9d8965bcde07",
+  "filename": "invoice-001.pdf",
+  "contentType": "application/pdf",
+  "s3Key": "documents/550e8400-e29b-41d4-a716-446655440000/3389b6cc-4116-4765-b2d6-9d8965bcde07",
+  "createdAt": "2026-11-04T08:22:11.192641Z"
+}
 ```
 
 ### Следующая проверка — 404 Not Found
