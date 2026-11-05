@@ -1,7 +1,3 @@
-# Кастомная конфигурация окружения
-app:
-  environment: Local
-
 server:
   port: 8084
 

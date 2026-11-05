@@ -63,7 +63,7 @@ public class DocumentService {
         documentRepository.save(document);
         logger.info("create, successfully saved, document: {}", document);
         String uploadUrl = s3StorageService.generateUploadUrl(s3Key, request.contentType(), UPLOAD_URL_EXPIRATION);
-        logger.info("create, successfully generateUploadUrl, uploadUrl: {}", uploadUrl);
+        logger.info("create, successfully created uploadUrl: {}", uploadUrl);
         return new DocumentCreatedResponse(
                 documentId,
                 request.filename(),

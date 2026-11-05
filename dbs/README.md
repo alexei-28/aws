@@ -2,6 +2,10 @@
 
 # AWS Document Processing & Notification Hub
 
+## Checklist
+1. Прооверка работы приложения в local environment 
+2. Прооверка работы приложения в настоящем AWS-окружении, используя Amazon RDS + DynamoDB + Amazon DocumentDB + S3
+
 Главная цель проекта — практически продемонстрировать понимание трёх разных типов AWS-баз данных:
 
 1. **AWS RDS (PostgreSQL)** — реляционные транзакционные данные.
@@ -1753,26 +1757,6 @@ public class DynamoDbConfig {
 
 Обрати внимание: мы намеренно не указываем `credentialsProvider`. SDK использует Default Credentials Provider Chain и на EC2 сможет получить временные credentials через IAM Role.
 
-### 10.4. Важный момент с текущим S3-классом
-
-Сейчас у тебя есть:
-
-```java
-@Service
-@Profile("local")
-public class S3StorageServiceImpl implements S3StorageService {
-}
-```
-
-Если запустить приложение с профилем `aws`, этот Bean не зарегистрируется. Следовательно, если не будет другой реализации `S3StorageService`, Spring не сможет создать `DocumentService`.
-
-До запуска на EC2 нужно:
-- либо реализовать `S3StorageServiceAws`;
-- либо временно создать отдельную AWS-профильную заглушку, если на этом этапе проверяем только три базы.
-
-Для полноценной загрузки документов лучше реализовать настоящий S3.
-
----
 
 ## 11. Подготовка приложения к запуску на EC2
 
@@ -1793,255 +1777,628 @@ ls -lh dbs/build/libs/
 ### 11.2. Передача JAR на EC2
 
 ```bash
-scp -i ~/Downloads/dbs-key.pem \
+scp -i ~/dev/projects/aws/dbs/secrets/dbs-key-ec2.pem \
   dbs/build/libs/dbs-0.0.1-SNAPSHOT.jar \
-  ec2-user@YOUR_EC2_PUBLIC_IP:/home/ec2-user/dbs.jar
+  ec2-user@51.20.8.221:/home/ec2-user/dbs.jar
 ```
-
-### 11.3. Передача настроек
-
-На EC2 создай файл:
+### Connect to EC2
 
 ```bash
-sudo mkdir -p /opt/dbs
-sudo nano /opt/dbs/dbs.env
+ssh -i dbs-key-ec2.pem ec2-user@51.20.8.221
 ```
 
-Пример содержимого `/opt/dbs/dbs.env`:
-
-```env
-SPRING_PROFILES_ACTIVE=aws
-
-DB_HOST=YOUR_RDS_ENDPOINT
-DB_PORT=5432
-DB_NAME=document_hub
-DB_USERNAME=YOUR_DB_USERNAME
-DB_PASSWORD=YOUR_DB_PASSWORD
-
-DOCDB_URI=mongodb://USERNAME:PASSWORD@YOUR_DOCDB_ENDPOINT:27017/document_analysis?tls=true&tlsCAFile=/etc/ssl/documentdb/global-bundle.pem&replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false
-
-AWS_REGION=eu-north-1
-```
-
-Ограничь права:
+### Run app on EC2
 
 ```bash
-sudo chmod 600 /opt/dbs/dbs.env
+java -jar dbs.jar --spring.profiles.active=ec2
 ```
 
-> Это временный учебный вариант. Для production credentials лучше получать из Secrets Manager, а не хранить в обычном env-файле.
+# Полная проверка AWS-приложения `com.gmail.alexei28.aws.dbs`
 
-### 11.4. Создание systemd service
+Предлагаю провести полноценное End-to-End (E2E) тестирование приложения в реальном AWS-окружении, используя все четыре AWS-сервиса:
+1. **Amazon RDS (PostgreSQL)**
+2. **Amazon DynamoDB**
+3. **Amazon DocumentDB**
+4. **Amazon S3**
 
+Проверять будем не только доступность AWS-сервисов, но и то, что Spring Boot действительно записывает и читает данные из каждой базы, загружает файлы в S3 и корректно обрабатывает документы.
+
+> **Важный принцип:** успешный запуск Spring Boot ещё не означает, что все четыре AWS-сервиса работают правильно. Каждый сервис должен быть проверен отдельно, а затем в составе общего бизнес-сценария.
+
+---
+
+## 1. Архитектура приложения и распределение ответственности
+
+Сначала зафиксируем ожидаемую архитектуру:
+
+```
+[ EC2 — Spring Boot Application ] (com.gmail.alexei28.aws.dbs / application-aws)
+       │
+       ├─► RDS (PostgreSQL) ──► DocumentEntity (Metadata)
+       ├─► DynamoDB ──────────► Processing state (Статус обработки / State)
+       ├─► DocumentDB (Mongo)─► Analysis documents (Analysis)
+       └─► S3 (Object Store)  ──► Original files (Files)
+```
+
+| AWS-сервис | Ответственность | Что проверяем |
+| :--- | :--- | :--- |
+| **RDS PostgreSQL** | Метаданные документа | `INSERT`, `SELECT`, `UPDATE` |
+| **DynamoDB** | Состояние обработки | Создание, получение, изменение статуса |
+| **DocumentDB** | Результаты анализа | Сохранение и чтение анализа |
+| **S3** | Хранение оригинальных файлов | Presigned URL, `PUT`, `GET`, `HEAD` |
+
+В рамках твоей архитектуры это хорошее разделение **Database per Responsibility**: каждая база решает собственную задачу, данные не дублируются без необходимости.
+
+---
+
+## 2. Используемые AWS-ресурсы
+
+Используем уже созданные ресурсы в регионе **eu-north-1**:
+
+| Параметр | Значение |
+| :--- | :--- |
+| **AWS Region** | `eu-north-1` |
+| **Application Host** | EC2 |
+| **RDS Database** | `aws-dbs-document-hub` |
+| **RDS User** | `dbadmin` |
+| **DocumentDB Cluster** | `dbs-document-hub-docdb-dev` |
+| **DynamoDB Table** | `dbs-document-processing-state-dev` |
+| **S3 Bucket** | `my-bucket-118697848787-eu-north-1-an` |
+| **REST API Base** | `/api/v1/documents` |
+| **Application Port** | `8080` (если не переопределён) |
+
+> **Обрати внимание:** Для проверки будем использовать EC2 как точку запуска приложения. Все подключения к приватным RDS и DocumentDB должны выполняться из EC2, а не с твоего локального компьютера.
+
+---
+
+## 3. Предварительная проверка конфигурации приложения
+
+До запуска E2E необходимо устранить несколько потенциальных проблем в предоставленном коде.
+
+### 3.1. Spring Profiles — важная проблема
+В твоём коде:
+```java
+@Service
+@Profile("aws")
+public class S3StorageServiceImpl implements S3StorageService { ... }
+```
+Но конфигурационный файл называется `application-aws.yml`. При этом в конфигурации указано:
+```yaml
+app:
+  environment: EC2
+```
+`app.environment` не активирует Spring Profile. Spring Boot автоматически загружает `application-aws.yml`, только если активирован профиль `aws`.
+
+**Проверь:**
 ```bash
-sudo nano /etc/systemd/system/dbs.service
+echo $SPRING_PROFILES_ACTIVE
 ```
-
-Содержимое:
-
-```ini
-[Unit]
-Description=Document Hub Service
-After=network.target
-
-[Service]
-Type=simple
-User=ec2-user
-WorkingDirectory=/home/ec2-user
-
-EnvironmentFile=/opt/dbs/dbs.env
-
-ExecStart=/usr/bin/java -jar /home/ec2-user/dbs.jar
-
-Restart=on-failure
-RestartSec=10
-
-SuccessExitStatus=143
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Запуск:
-
+Если приложение должно использовать профиль `aws`, запускай:
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable dbs
-sudo systemctl start dbs
+java -jar aws-dbs.jar --spring.profiles.active=aws
+```
+Либо через переменную окружения:
+```bash
+export SPRING_PROFILES_ACTIVE=aws
+```
+> **Важно:** если у тебя действительно используется профиль `ec2`, необходимо либо изменить `@Profile("aws")` на `@Profile("ec2")`, либо явно активировать оба профиля.
+> 
+> Убедись, что одновременно загружаются:
+> - AWS-настройки
+> - AWS `S3StorageServiceImpl`
+> - AWS-конфигурации DynamoDB
+> - DocumentDB-конфигурация
+
+### 3.2. Проверка безопасности Principal
+Сейчас у тебя:
+```java
+private UUID getUserId(Principal principal) {
+    if (principal == null) {
+        return UUID.fromString("550e8400-e29b-41d4-a716-446655440000");
+    }
+    return UUID.fromString(principal.getName());
+}
+```
+Это допустимо для локального тестирования, но для AWS-проверки лучше не оставлять такую логику (при отсутствии аутентификации любой запрос будет работать с одним и тем же UUID).
+
+**Для production-варианта:**
+```java
+private UUID getUserId(Principal principal) {
+    if (principal == null) {
+        throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
+    }
+    return UUID.fromString(principal.getName());
+}
+```
+Если JWT Security ещё не настроен, можно временно использовать тестовую аутентификацию, но не оставлять публичный fallback.
+
+### 3.3. Проверка RDS credentials
+Сейчас пароль указан непосредственно в YAML:
+```yaml
+spring:
+  datasource:
+    username: dbadmin
+    password: postgres
+```
+Для тестирования лучше использовать переменные окружения:
+```yaml
+spring:
+  datasource:
+    username: ${RDS_USERNAME}
+    password: ${RDS_PASSWORD}
+```
+В EC2:
+```bash
+export RDS_USERNAME=dbadmin
+export RDS_PASSWORD='YOUR_PASSWORD'
+```
+*Не публикуй реальные credentials в GitHub и не выводи их в логи.*
+
+### 3.4. Проверка DocumentDB TLS
+У тебя:
+```yaml
+spring:
+  data:
+    mongodb:
+      uri: mongodb://${DOCDB_USERNAME}:${DOCDB_PASSWORD}@dbs-document-hub-docdb-dev.cluster-chwkoqm0uc0i.eu-north-1.docdb.amazonaws.com:27017/?tls=true&replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false
+```
+Нужно убедиться, что Java доверяет сертификату Amazon DocumentDB. Для этого используй актуальный AWS CA bundle и настрой JVM truststore либо соответствующий TLS trust configuration MongoDB Java Driver.
+
+### 3.5. Проверка S3
+Твой `S3StorageServiceImpl` использует `S3Presigner`. Убедись, что:
+- `S3Presigner` создаётся с регионом `eu-north-1`;
+- Используется правильная IAM Role EC2;
+- Имя bucket совпадает с YAML;
+- IAM Role разрешает создание объектов в нужном bucket/prefix.
+
+---
+
+## 4. Проверка сетевой доступности AWS
+
+Это первый практический этап. Пока не проверим сетевые соединения, нет смысла запускать приложение.
+
+### 4.1. Подключение к EC2
+С локального компьютера:
+```bash
+ssh -i your-key.pem ec2-user@EC2_PUBLIC_IP
+```
+Все следующие команды выполняем на EC2.
+
+Проверяем регион:
+```bash
+aws configure get region
+# Ожидаемый результат: eu-north-1
+```
+Если регион не задан:
+```bash
+export AWS_DEFAULT_REGION=eu-north-1
 ```
 
-Проверка статуса и логов:
-
+### 4.2. Проверка RDS PostgreSQL
+Выполняем:
 ```bash
-sudo systemctl status dbs
-sudo journalctl -u dbs -f
+nc -vz -w 5 aws-dbs-document-hub.chwkoqm0uc0i.eu-north-1.rds.amazonaws.com 5432
+# Ожидаемый результат: Ncat: Connected to ...:5432.
+```
+Если получаешь `TIMEOUT`, проверяй:
+1. EC2 Security Group.
+2. RDS Security Group.
+3. Inbound rule RDS: TCP 5432 (Source — Security Group EC2).
+4. RDS статус должен быть `Available`.
+5. Network ACL и маршруты VPC.
+
+| Параметр | Значение |
+| :--- | :--- |
+| **Type** | PostgreSQL |
+| **Protocol** | TCP |
+| **Port** | 5432 |
+| **Source** | EC2 Security Group |
+
+### 4.3. Проверка DocumentDB
+```bash
+nc -vz -w 5 dbs-document-hub-docdb-dev.cluster-chwkoqm0uc0i.eu-north-1.docdb.amazonaws.com 27017
+# Ожидаемый результат: Ncat: Connected to ...:27017.
+```
+Security Group DocumentDB должна разрешать входящие подключения на 27017 от Security Group EC2.
+
+### 4.4. Проверка DynamoDB
+DynamoDB — managed service, поэтому подключение к нему выполняется через AWS API, а не через отдельный TCP-порт.
+
+Проверяем:
+```bash
+aws dynamodb describe-table \
+  --table-name dbs-document-processing-state-dev \
+  --region eu-north-1
+```
+Ожидаемый вывод:
+```json
+{
+  "Table": {
+    "TableName": "dbs-document-processing-state-dev",
+    "TableStatus": "ACTIVE"
+  }
+}
+```
+
+### 4.5. Проверка S3
+```bash
+aws s3api head-bucket \
+  --bucket my-bucket-118697848787-eu-north-1-an \
+  --region eu-north-1
+```
+При успехе команда возвращает exit code `0`.
+
+Дополнительно:
+```bash
+aws s3 ls s3://my-bucket-118697848787-eu-north-1-an/
 ```
 
 ---
 
-## 12. Проверка работы проекта на AWS
+## 5. Проверка IAM Role EC2
 
-Теперь переходим к самому важному — проверке реальной интеграции.
+Приложение должно обращаться к AWS без хранения AWS Access Key и Secret Key в `application-aws.yml`.
 
-### 12.1. Проверка Spring Boot
-
-С локального компьютера:
-
+### 5.1. Проверка текущей AWS Identity
+На EC2:
 ```bash
-curl -i http://YOUR_EC2_PUBLIC_IP:8084/api/v1/actuator/health
+aws sts get-caller-identity
 ```
-
 Ожидаемый результат:
-
 ```json
 {
-  "status": "UP"
+  "UserId": "...",
+  "Account": "118697848787",
+  "Arn": "arn:aws:sts::118697848787:assumed-role/YOUR_ROLE_NAME/..."
 }
 ```
 
-### 12.2. Проверка RDS
+### 5.2. Необходимые разрешения
+Для работы приложения IAM Role должна иметь следующие разрешения:
 
-Создай документ:
+| AWS Service | IAM permissions |
+| :--- | :--- |
+| **S3** | `s3:PutObject`, `s3:GetObject`, `s3:HeadObject` |
+| **DynamoDB** | `dynamodb:PutItem`, `dynamodb:GetItem`, `dynamodb:UpdateItem`, `dynamodb:Query` |
+| **DynamoDB (доп.)**| `dynamodb:DescribeTable`, `dynamodb:Scan` |
+| **SQS (если есть)**| `sqs:SendMessage`, `sqs:ReceiveMessage`, `sqs:DeleteMessage`, `sqs:GetQueueAttributes` |
 
+---
+
+## 6. Проверка Amazon RDS PostgreSQL
+
+### 6.1. Подключение к PostgreSQL
+Если `psql` установлен:
+```bash
+psql \
+  -h aws-dbs-document-hub.chwkoqm0uc0i.eu-north-1.rds.amazonaws.com \
+  -p 5432 \
+  -U dbadmin \
+  -d aws-dbs-document-hub
+```
+Проверяем базу и схему:
+```sql
+SELECT version();
+SELECT current_database();
+SELECT schema_name FROM information_schema.schemata ORDER BY schema_name;
+```
+
+### 6.2. Проверка таблиц и Flyway
+```sql
+SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name;
+SELECT * FROM flyway_schema_history ORDER BY installed_rank;
+```
+
+### 6.3. Проверка DocumentEntity
+```sql
+SELECT * FROM documents ORDER BY created_at DESC LIMIT 10;
+```
+Поля записи:
+
+| Поле | Ожидаемое значение |
+| :--- | :--- |
+| `id` | UUID документа |
+| `user_id` | UUID пользователя |
+| `filename` | `test-document.pdf` |
+| `content_type` | `application/pdf` |
+| `s3_key` | `documents/{userId}/{documentId}` |
+| `created_at` | Время создания |
+
+---
+
+## 7. Проверка Amazon DynamoDB
+
+### 7.1. Проверка структуры таблицы
+```bash
+aws dynamodb describe-table \
+  --table-name dbs-document-processing-state-dev \
+  --region eu-north-1
+```
+
+### 7.2. Проверка записей
+```bash
+aws dynamodb scan \
+  --table-name dbs-document-processing-state-dev \
+  --region eu-north-1
+```
+Пример структуры записи:
+```json
+{
+  "documentId": "DOCUMENT_UUID",
+  "status": "PROCESSING",
+  "createdAt": "2026-11-05T..."
+}
+```
+
+### 7.3. Проверка смены статусов
+```
+PENDING ──► PROCESSING ──► COMPLETED
+                      └──► FAILED
+```
+
+---
+
+## 8. Проверка Amazon DocumentDB
+
+### 8.1. Подключение через MongoDB Shell
+На EC2 скачиваем AWS CA bundle:
+```bash
+wget https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
+```
+Подключаемся:
+```bash
+mongosh \
+  "mongodb://DOCDB_USERNAME:DOCDB_PASSWORD@dbs-document-hub-docdb-dev.cluster-chwkoqm0uc0i.eu-north-1.docdb.amazonaws.com:27017/?tls=true&replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false" \
+  --tlsCAFile global-bundle.pem
+```
+Проверяем ping:
+```javascript
+db.runCommand({ ping: 1 })
+// Ожидаем: { ok: 1 }
+```
+
+### 8.2. Проверка коллекций и записей анализа
+```javascript
+use document_hub
+show collections
+db.document_analysis.find().pretty()
+```
+Пример сохранённого анализа:
+```json
+{
+  "documentId": "DOCUMENT_UUID",
+  "status": "COMPLETED",
+  "analysis": {
+    "summary": "Document summary",
+    "keywords": ["AWS", "Java", "Spring"]
+  }
+}
+```
+
+---
+
+## 9. Проверка Amazon S3
+
+### 9.1. Проверка bucket location
+```bash
+aws s3api get-bucket-location --bucket my-bucket-118697848787-eu-north-1-an
+```
+
+### 9.2. Тест загрузки файла через Presigned URL
+Создаём файл:
+```bash
+echo "AWS Document Hub E2E Test" > test-document.txt
+```
+Загружаем по полученному от API URL:
+```bash
+curl -X PUT \
+  -H "Content-Type: text/plain" \
+  --upload-file test-document.txt \
+  "PRESIGNED_UPLOAD_URL"
+```
+
+### 9.3. Проверка существования и содержимого файла
+```bash
+aws s3api head-object \
+  --bucket my-bucket-118697848787-eu-north-1-an \
+  --key "documents/USER_UUID/DOCUMENT_UUID" \
+  --region eu-north-1
+
+aws s3api get-object \
+  --bucket my-bucket-118697848787-eu-north-1-an \
+  --key "documents/USER_UUID/DOCUMENT_UUID" \
+  downloaded-document.txt \
+  --region eu-north-1
+
+cat downloaded-document.txt
+```
+
+---
+
+## 10. Проверка Spring Boot REST API в AWS
+
+Базовые настройки:
+```bash
+export BASE_URL="http://EC2_PUBLIC_IP:8080/api/v1"
+export USER_ID="550e8400-e29b-41d4-a716-446655440000"
+```
+
+### 10.1. Проверка запуска и Actuator
+```bash
+tail -f /var/log/aws-dbs/application.log
+# или sudo journalctl -u aws-dbs -f
+
+curl -i http://localhost:8080/actuator/health
+```
+
+### 10.2. POST — Создание документа
 ```bash
 curl -i -X POST \
-  http://YOUR_EC2_PUBLIC_IP:8084/api/v1/documents \
+  "$BASE_URL/documents" \
   -H "Content-Type: application/json" \
   -d '{
-    "filename": "aws-invoice-001.pdf",
-    "contentType": "application/pdf"
+    "filename": "test-document.txt",
+    "contentType": "text/plain"
   }'
 ```
-
-Ожидаем: `HTTP/1.1 201`
-
-Затем получи список:
-
-```bash
-curl -i http://YOUR_EC2_PUBLIC_IP:8084/api/v1/documents
-```
-
-Проверь, что созданная запись появилась в RDS PostgreSQL. Можно также проверить её SQL-запросом через `psql` с EC2.
-
-### 12.3. Проверка DynamoDB
-
-После реализации `ProcessingServiceImpl`:
-
-1. Выполни регистрацию документа.
-2. Приложение должно создать запись в DynamoDB.
-3. Открой **AWS Console → DynamoDB → Tables**.
-4. Открой `document-processing-state-dev`.
-5. Найди запись по `documentId`.
-
-Ожидаемое состояние:
-
+Ожидаемый ответ (`201 Created`):
 ```json
 {
-  "documentId": "YOUR_DOCUMENT_ID",
-  "status": "PENDING",
-  "currentStep": "UPLOAD",
-  "attempts": 0
+  "documentId": "DOCUMENT_UUID",
+  "filename": "test-document.txt",
+  "uploadUrl": "https://...",
+  "createdAt": "2026-11-05T..."
 }
 ```
-
-Затем проверь:
-
+Сохраняем значения:
 ```bash
-curl -i http://YOUR_EC2_PUBLIC_IP:8084/api/v1/documents/{id}/status
+export DOCUMENT_ID="DOCUMENT_UUID"
+export UPLOAD_URL="PRESIGNED_UPLOAD_URL"
 ```
 
-Ожидаем `200 OK` и актуальное состояние из DynamoDB.
-
-### 12.4. Проверка DocumentDB
-
-После реализации `AnalysisRepositoryImpl`:
-
-1. Сохрани тестовый JSON-результат анализа.
-2. Проверь наличие документа в коллекции `analyses`.
-3. Получи его через REST API:
-
+### 10.3. Проверка S3 PUT & GET endpoints
 ```bash
-curl -i http://YOUR_EC2_PUBLIC_IP:8084/api/v1/documents/YOUR_DOCUMENT_ID/analysis
+# Upload file
+curl -i -X PUT -H "Content-Type: text/plain" --upload-file test-document.txt "$UPLOAD_URL"
+
+# Get all documents
+curl -i "$BASE_URL/documents?page=0&size=20"
+
+# Get document metadata
+curl -i "$BASE_URL/documents/$DOCUMENT_ID"
+
+# Get status (DynamoDB)
+curl -i "$BASE_URL/documents/$DOCUMENT_ID/status"
+
+# Get analysis (DocumentDB)
+curl -i "$BASE_URL/documents/$DOCUMENT_ID/analysis"
+
+# Request retry (202 Accepted)
+curl -i -X POST "$BASE_URL/documents/$DOCUMENT_ID/retry"
 ```
 
-Ожидаем: `HTTP/1.1 200`
+---
 
-Ответ должен содержать JSON, который был сохранён в DocumentDB.
+## 11. Полный E2E-сценарий
 
-Для проверки подключения можно также использовать MongoDB Java Driver или `mongosh` на EC2. Помни, что TLS должен быть включён и CA bundle должен быть доступен приложению.
+```
+[1. POST /api/v1/documents]
+       │
+       ├──► RDS: INSERT DocumentEntity
+       └──► S3Presigner: Generate Presigned PUT URL
+       │
+[2. PUT Presigned URL] ──► S3: Upload original file
+       │
+[3. Processing Event] ──► DynamoDB: State = PENDING -> PROCESSING
+       │
+[4. Analysis Exec] ────► S3: Read file ──► Mongo (DocDB): Save Analysis
+       │
+[5. Processing Complete] ► DynamoDB: State = COMPLETED
+       │
+[6. GET /analysis] ─────► Fetch results from DocumentDB (E2E SUCCESS)
+```
 
 ---
 
-## 13. Итоговая чек-лист проверка
+## 12. Негативные тесты — Проверка надёжности
 
-### AWS Integration Checklist
-
-- [ ] EC2 запущен, Java 21 установлена
-- [ ] Spring Boot запущен через systemd
-- [ ] RDS PostgreSQL доступен из EC2
-- [ ] Flyway успешно применил миграции к RDS
-- [ ] `POST /documents` сохраняет запись в RDS
-- [ ] `GET /documents` читает данные из RDS
-- [ ] DynamoDB принимает и возвращает processing state
-- [ ] DocumentDB сохраняет и возвращает JSON analysis
-- [ ] IAM Role работает без AWS Access Keys в приложении
-- [ ] CloudWatch или systemd logs позволяют диагностировать ошибки
-
-> **Важное уточнение:** сейчас у тебя уже работает PostgreSQL-часть, но DynamoDB и DocumentDB в Java-коде пока не реализованы. Поэтому создание AWS ресурсов само по себе ещё не сделает `GET /status` и `GET /analysis` рабочими. Их подключение — отдельные этапы разработки.
-
----
-
-## 14. Как не оставить AWS ресурсы работать после тестирования
-
-После завершения учебной сессии:
-
-- **EC2** — остановить (`Stop instance`), если временно не используешь.
-- **RDS** — удалить, если не нужна база; при необходимости предварительно создать snapshot.
-- **DocumentDB** — удалить cluster и instance, если тестирование завершено.
-- **DynamoDB** — удалить таблицу, если данные больше не нужны.
-- Проверить наличие оставшихся EBS Volumes, snapshots и других ресурсов.
-
-> Остановка EC2 не удаляет EBS storage. У RDS и DocumentDB также могут оставаться оплачиваемые ресурсы и данные после остановки или отключения приложения.
+| № | Сценарий | Ожидаемый результат |
+| :-: | :--- | :--- |
+| **1** | POST без `filename` | `400 Bad Request` |
+| **2** | POST с неправильным `contentType` | `400 Bad Request` (если есть валидация) |
+| **3** | GET с несуществующим UUID | `404 Not Found` |
+| **4** | GET чужого документа | `404 Not Found` |
+| **5** | GET с невалидным UUID | `400 Bad Request` |
+| **6** | S3 PUT с несоответствующим `Content-Type` | Ошибка подписи S3 |
+| **7** | S3 PUT после истечения 15 минут | `403 Forbidden` |
+| **8** | RDS недоступен | Ошибка подключения, запись не сохраняется |
+| **9** | DynamoDB недоступен | Ошибка обновления статуса |
+| **10**| DocumentDB недоступен | Ошибка сохранения анализа |
+| **11**| Повторный `retry` | Корректный перезапуск без дубликатов |
+| **12**| Пустой Presigned URL | Ошибка создания документа |
 
 ---
 
-## 15. Предлагаемый план поэтапного выполнения
+## 13. Проверка согласованности данных
 
-Не рекомендую создавать все четыре ресурса и сразу пытаться запустить приложение. Если что-то не подключится, будет сложно понять причину.
+Сводная таблица состояний данных для единого `DOCUMENT_ID`:
 
-Оптимальная последовательность нашей дальнейшей работы:
-
-1. **Сеть и Security Groups:** Подготовить VPC, `sg-dbs-ec2`, `sg-dbs-rds`, `sg-dbs-docdb`.
-2. **RDS PostgreSQL:** Создать RDS, подключиться к нему и перенести локальную Flyway-схему.
-3. **DynamoDB:** Создать таблицу и реализовать `ProcessingServiceImpl`.
-4. **DocumentDB:** Создать кластер, подключить Java Driver и реализовать `AnalysisRepositoryImpl`.
-5. **EC2:** Создать EC2, настроить IAM Role, установить Java и развернуть JAR.
-6. **AWS Integration Testing:** Проверить весь REST API и взаимодействие с тремя базами.
+| Этап | RDS | DynamoDB | DocumentDB | S3 |
+| :--- | :--- | :--- | :--- | :--- |
+| **Документ создан** | `DocumentEntity` | — | — | — |
+| **Файл загружен** | `DocumentEntity` | — | — | Object |
+| **Обработка началась** | `DocumentEntity` | `PROCESSING` | — | Object |
+| **Анализ завершён** | `DocumentEntity` | `COMPLETED` | `Analysis` | Object |
+| **Повторная обработка** | `DocumentEntity` | Новый статус | Updated Analysis | Object |
 
 ---
 
-### Следующий шаг
+## 14. Итоговый чек-лист проверки (AWS E2E Verification)
 
-Начнём с **Этапа 1 — VPC и Security Groups**. Сначала уточни: в `eu-north-1` у тебя уже есть **Default VPC** или будем создавать отдельную VPC для `dbs-dev`?
+- [ ] **1. AWS Infrastructure**
+  - [ ] EC2 доступен по SSH
+  - [ ] AWS IAM Role работает (`sts get-caller-identity`)
+  - [ ] RDS Security Group разрешает EC2:5432
+  - [ ] DocumentDB Security Group разрешает EC2:27017
+  - [ ] DynamoDB Table имеет статус `ACTIVE`
+  - [ ] S3 Bucket доступен
+- [ ] **2. Amazon RDS**
+  - [ ] Установлено PostgreSQL-соединение
+  - [ ] Flyway миграции выполнены
+  - [ ] `DocumentEntity` успешно сохраняется
+  - [ ] `DocumentEntity` успешно читается
+  - [ ] Проверена фильтрация по `userId`
+  - [ ] Проверена пагинация
+- [ ] **3. Amazon DynamoDB**
+  - [ ] Подключение через AWS SDK работает
+  - [ ] Создаётся processing state
+  - [ ] Статус успешно читается
+  - [ ] Статус успешно обновляется
+  - [ ] Проверен retry
+- [ ] **4. Amazon DocumentDB**
+  - [ ] TLS-соединение работает
+  - [ ] MongoDB ping успешен
+  - [ ] Analysis успешно сохраняется
+  - [ ] Analysis успешно читается
+  - [ ] Повторный анализ корректно обновляется
+- [ ] **5. Amazon S3**
+  - [ ] `S3Presigner` успешно создаёт URL
+  - [ ] Presigned URL действителен 15 минут
+  - [ ] PUT загружает файл
+  - [ ] HEAD подтверждает существование объекта
+  - [ ] GET скачивает правильный файл
+- [ ] **6. REST API / E2E**
+  - [ ] `POST /documents` → `201 Created`
+  - [ ] `GET /documents` → `200 OK`
+  - [ ] `GET /documents/{id}` → `200 OK`
+  - [ ] `GET /documents/{id}/status` → `200 OK`
+  - [ ] `GET /documents/{id}/analysis` → `200 OK` (после обработки)
+  - [ ] `POST /documents/{id}/retry` → `202 Accepted`
+  - [ ] Проверены негативные сценарии
+  - [ ] Все четыре сервиса содержат согласованные данные
 
+---
 
-### Чек-лист развёртывания и проверки
-     [EC2 Client (curl/Postman)]
-            │
-            ▼
-        ┌───────────┐      1. User/Doc Registration (ACID)      ┌────────────────┐
-        │           ├──────────────────────────────────────────►│ RDS PostgreSQL │
-        │           │                                           └────────────────┘
-        │           │      2. Pre-signed Upload URL / Storage   ┌────────────────┐
-        │           ├──────────────────────────────────────────►│     AWS S3     │
-        │  Spring   │                                           └────────────────┘
-        │   Boot    │      3. Task Queue & Processing           ┌────────────────┐
-        │   (dbs)   ├──────────────────────────────────────────►│    AWS SQS     │
-        │   on EC2  │                                           └────────────────┘
-        │           │      4. Job State & Progress Tracking     ┌────────────────┐
-        │           ├──────────────────────────────────────────►│  AWS DynamoDB  │
-        │           │                                           └────────────────┘
-        │           │      5. Unstructured Analysis JSON        ┌────────────────┐
-        │           ├──────────────────────────────────────────►│ AWS DocumentDB │
-        └───────────┘                                           └────────────────┘
+## 15. Рекомендуемый порядок выполнения
 
+```
+┌─────────────────────────┐
+│ 1. IAM & Network        │ ──► Сетевая доступность и права
+└────────────┬────────────┘
+             ▼
+┌─────────────────────────┐
+│ 2. Databases Check      │ ──► RDS, DocumentDB, DynamoDB, S3 по отдельности
+└────────────┬────────────┘
+             ▼
+┌─────────────────────────┐
+│ 3. Spring Boot App      │ ──► Запуск, профили, beans, healthcheck
+└────────────┬────────────┘
+             ▼
+┌─────────────────────────┐
+│ 4. REST & E2E Process   │ ──► End-to-End прохождение данных
+└────────────┬────────────┘
+             ▼
+┌─────────────────────────┐
+│ 5. Failure Handling     │ ──► Негативные сценарии
+└─────────────────────────┘
+```
