@@ -1,7 +1,5 @@
 package com.gmail.alexei28.aws.dbs.service;
 
-
-import com.gmail.alexei28.aws.dbs.controller.DocumentController;
 import com.gmail.alexei28.aws.dbs.dto.request.CreateDocumentRequest;
 import com.gmail.alexei28.aws.dbs.dto.response.DocumentAnalysisResponse;
 import com.gmail.alexei28.aws.dbs.dto.response.DocumentCreatedResponse;
@@ -61,9 +59,10 @@ public class DocumentService {
                 createdAt
         );
         documentRepository.save(document);
-        logger.info("create, successfully saved, document: {}", document);
+        logger.info("create, saved, document: {}", document);
+        processingService.initializeStatus(documentId);
         String uploadUrl = s3StorageService.generateUploadUrl(s3Key, request.contentType(), UPLOAD_URL_EXPIRATION);
-        logger.info("create, successfully created uploadUrl: {}", uploadUrl);
+        logger.info("create, created uploadUrl");
         return new DocumentCreatedResponse(
                 documentId,
                 request.filename(),

@@ -1,12 +1,14 @@
 package com.gmail.alexei28.aws.dbs.service;
 
 import com.gmail.alexei28.aws.dbs.dto.response.DocumentStatusResponse;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 
 import java.util.UUID;
 
 @Service
-public class ProcessingServiceImpl implements ProcessingService {
+@Profile("local") // только для локального окружения
+public class ProcessingServiceLocalImpl implements ProcessingService {
 
     @Override
     public DocumentStatusResponse getStatus(UUID documentId) {
@@ -17,8 +19,10 @@ public class ProcessingServiceImpl implements ProcessingService {
 
     @Override
     public void requestRetry(UUID documentId) {
-        throw new UnsupportedOperationException(
-                "SQS integration is not implemented yet"
-        );
+    }
+
+    @Override
+    public void initializeStatus(UUID documentId) {
+
     }
 }

@@ -27,7 +27,10 @@ aws:
   s3:
     bucket: my-bucket-118697848787-eu-north-1-an
   dynamodb:
-    table-name: dbs-document-processing-state-dev
+    processing-table: dbs-document-processing-state-dev
+    analysis-collection: document_analyses
+  sqs:
+    retry-queue-url: https://sqs.eu-north-1.amazonaws.com/118697848787/document-jobs
 
 management:
   endpoints:
@@ -36,6 +39,8 @@ management:
         include:
           - health
           - info
+          - beans # remove on prod
+          - env # remove on prod
 
   endpoint:
     health:

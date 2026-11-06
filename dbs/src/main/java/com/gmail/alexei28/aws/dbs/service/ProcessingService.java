@@ -11,4 +11,6 @@ public interface ProcessingService {
     DocumentStatusResponse getStatus(UUID documentId);
 
     void requestRetry(UUID documentId);
+
+    void initializeStatus(UUID documentId);
 }

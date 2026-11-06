@@ -6,6 +6,7 @@
 
 # Some generic vars
 :BASE_URL = http://localhost:8084/api/v1
+:AWS_EC2_BASE_URL = http://51.20.8.221:8084/api/v1
 
 # Header
 :REQUEST_HEADER = <<
@@ -15,13 +16,23 @@ Content-Type: application/json
 GET :BASE_URL/actuator/health
 
 #
+GET :AWS_EC2_BASE_URL/actuator/health
+
+#
 GET :BASE_URL/actuator/info
 
 #
 GET :BASE_URL/actuator/env
 
 #
+GET :AWS_EC2_BASE_URL/actuator/env
+
+#
 GET :BASE_URL/actuator/beans
+
+#
+GET :AWS_EC2_BASE_URL/actuator/beans
+
 
 # Say hello
 GET :BASE_URL/hello

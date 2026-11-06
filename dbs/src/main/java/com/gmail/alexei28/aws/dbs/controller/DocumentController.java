@@ -1,6 +1,5 @@
 package com.gmail.alexei28.aws.dbs.controller;
 
-import com.gmail.alexei28.aws.dbs.DbsMain;
 import com.gmail.alexei28.aws.dbs.dto.request.CreateDocumentRequest;
 import com.gmail.alexei28.aws.dbs.dto.response.DocumentAnalysisResponse;
 import com.gmail.alexei28.aws.dbs.dto.response.DocumentCreatedResponse;
