@@ -1,6 +1,18 @@
-# Spring Boot + AWS RDS, AWS DynamoDB, AWS DocumentDB
+# Spring Boot + AWS RDS, AWS DynamoDB, AWS DocumentDB, AWS S3
 
 # AWS Document Processing & Notification Hub
+
+
+### Предполагаемый сценарий тестирования:
+1. Локальный компьютер отправляет HTTP-запрос на EC2.
+2. Spring Boot принимает документ.
+3. Файл сохраняется в S3.
+4. Метаданные сохраняются в PostgreSQL (RDS).
+5. Состояние обработки записывается в DynamoDB.
+6. Приложение выполняет анализ документа.
+7. Результат сохраняется в DocumentDB.
+8. Статус обработки обновляется в DynamoDB.
+9. Клиент получает результат через REST API.
 
 ## Checklist
 1. Прооверка работы приложения в local environment 
