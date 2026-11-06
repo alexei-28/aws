@@ -43,6 +43,9 @@ build
 # ec2
 ec2/secrets/
 
+# dbs
+dbs/secrets/
+
 # api-gateway
 api-gateway/secrets/
 

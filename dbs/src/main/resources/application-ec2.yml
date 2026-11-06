@@ -1,0 +1,48 @@
+
+app:
+  environment: EC2
+
+spring:
+  datasource:
+    url: jdbc:postgresql://aws-dbs-document-hub.chwkoqm0uc0i.eu-north-1.rds.amazonaws.com:5432/aws-dbs-document-hub?sslmode=require
+    username: dbadmin
+    password: postgres # must be remove from git
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: false
+
+  flyway:
+    enabled: true
+
+  mvc:
+    servlet:
+      path: /api/v1
+
+aws:
+  region: eu-north-1
+  s3:
+    bucket: my-bucket-118697848787-eu-north-1-an
+  dynamodb:
+    processing-table: dbs-document-processing-state-dev
+    analysis-collection: document_analyses
+  sqs:
+    retry-queue-url: https://sqs.eu-north-1.amazonaws.com/118697848787/document-jobs
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include:
+          - health
+          - info
+          - beans # remove on prod
+          - env # remove on prod
+
+  endpoint:
+    health:
+      probes:
+        enabled: true

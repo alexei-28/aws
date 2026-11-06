@@ -1,0 +1,29 @@
+# Download docker images (if needed) and create container
+#  docker compose -f dbs-docker-compose.yml down -v
+#  docker compose -f dbs-docker-compose.yml up -d
+services:
+  postgres:
+    image: postgres:17
+    container_name: aws_dbs_postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: aws_dbs_document_hub
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d aws_dbs_document_hub"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  postgres_data:
