@@ -27,6 +27,7 @@ dependencies {
     implementation("software.amazon.awssdk:dynamodb")
     implementation(platform("software.amazon.awssdk:bom:2.33.0"))
     implementation("software.amazon.awssdk:s3")
+    implementation("software.amazon.awssdk:sqs")
 
     runtimeOnly("org.postgresql:postgresql")
 
